@@ -12,4 +12,24 @@
 // the source's default ID base (the source root's cleaned absolute path as
 // given, no symlink resolution), which the pipeline uses when no
 // --id-base / SARD_ID_BASE override is set.
+//
+// The git source (task T5) is exported as:
+//
+//	Git(url string, opts GitOptions, log *slog.Logger) (*GitResult, error)
+//
+// url is a git repository URL — an https URL, a git@ ssh form, or the
+// owner/repo shorthand; also file:///path or an existing local path
+// for local clones — cloned shallowly into a temporary directory.
+// GitResult holds the discovered files (sorted by RelPath) with git
+// provenance (the resolved HEAD commit's SHA and committer time — see
+// git.go for the shallow-clone attribution semantics — and GitHub blob
+// URLs for github.com origins), the run's default ID base — the
+// normalized origin URL, lowercased host, no trailing .git, never
+// credentials — and the branch the clone resolved to.
+//
+// GitOptions mirrors LocalOptions: the same include/exclude globs
+// (matched case-sensitively against the slash-separated path relative
+// to the repository root), max depth, and max file size apply to the
+// git source as well, so the pipeline (task T7) treats both sources
+// uniformly; Branch and Token are the git-specific additions.
 package source
