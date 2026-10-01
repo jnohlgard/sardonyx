@@ -49,7 +49,7 @@ func writeTree(t *testing.T, root string, files map[string]string) {
 
 // walkTree is the temp fixture for the walk-mode tests: the committed
 // testdata/local layout plus entries that only make sense outside a
-// repository — a .md file inside a noise dir, a non-markdown file, and a
+// repository — a .md file inside a noise dir, a non-Markdown file, and a
 // .idea dir (committed fixtures cannot carry either, see
 // testdata/local/README.md).
 func walkTree() map[string]string {
@@ -80,8 +80,8 @@ func walkTree() map[string]string {
 }
 
 // walkDefault is the exact set discovered from walkTree with no options:
-// every markdown file except the binary (nul.md) and empty (zero.md,
-// blank.md) skips, the non-markdown notmd.txt, and the noise-dir contents.
+// every Markdown file except the binary (nul.md) and empty (zero.md,
+// blank.md) skips, the non-Markdown notmd.txt, and the noise-dir contents.
 var walkDefault = []string{
 	"README.md",
 	"broken/invalid.md",
@@ -274,7 +274,7 @@ func TestLocalWalk(t *testing.T) {
 	})
 }
 
-// deepTree is the T9 monorepo fixture: one markdown file at every depth
+// deepTree is the T9 monorepo fixture: one Markdown file at every depth
 // from 1 to 12 below the root (d/, d/d/, …).
 func deepTree() map[string]string {
 	files := map[string]string{}
@@ -631,8 +631,8 @@ func TestLocalIDBase(t *testing.T) {
 }
 
 // TestLocalFixture: the committed fixture tree under testdata/local. It is
-// deliberately mode-independent: it holds no markdown file inside a noise
-// dir and no untracked or gitignored markdown, so `git ls-files` (when
+// deliberately mode-independent: it holds no Markdown file inside a noise
+// dir and no untracked or gitignored Markdown, so `git ls-files` (when
 // this tree sits inside the sardonyx repo) and the filesystem walk
 // discover the same set. See testdata/local/README.md.
 func TestLocalFixture(t *testing.T) {
@@ -654,7 +654,7 @@ func TestLocalFixture(t *testing.T) {
 		"notes.markdown",
 	}
 	// binary/nul.md (NUL byte), empty/zero.md, and empty/blank.md (empty)
-	// are skipped; the noise dirs contain no markdown. The set asserts
+	// are skipped; the noise dirs contain no Markdown. The set asserts
 	// .mdx is a discovered extension (guide.mdx; isMarkdown, T9 edge
 	// case: .mdx frontmatter).
 	root, _ := filepath.Abs(fixture)
