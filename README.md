@@ -7,14 +7,6 @@ Ingest **Markdown files** from a **git repository URL** or a **local directory**
 > `docs/PLAN.md` §10). The tool builds to a single static binary
 > (see [Building](#building)).
 
-## Why the name
-
-**sardonyx** is a red-and-black banded variety of onyx (both are forms of
-chalcedony) — the repo and Go module carry the full name, while the
-command line tool is simply **`sard`**, the stone's own name: short, easy to
-type, and unambiguous as a CLI. It builds to a single static binary: no
-interpreter or virtualenv needed on the target machine.
-
 ## What it does
 
 ```bash
@@ -153,6 +145,14 @@ runs; `--dry-run` needs neither (it sends nothing). All other flags are
 documented by `sard ingest --help` and in `docs/PLAN.md` §4.
 
 See [`.env.example`](.env.example).
+
+## Why the name
+
+**sardonyx** is a red-and-black banded variety of onyx (both are forms of
+chalcedony) — the repo and Go module carry the full name, while the
+command line tool is simply **`sard`**, the stone's own name: short, easy to
+type, and unambiguous as a CLI. It builds to a single static binary: no
+interpreter or virtualenv needed on the target machine.
 
 ## Repository layout
 
