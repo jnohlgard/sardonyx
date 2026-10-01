@@ -1,22 +1,35 @@
 // Copyright (C) 2026 Joakim Nohlgård
 // SPDX-License-Identifier: AGPL-3.0
 
-// Package cli wires sard's pipeline together: flag parsing, config
-// resolution, source discovery, transform, ingestion, and the final
-// summary (docs/PLAN.md §3, §4; task T7).
+// Package cli wires sard's pipeline together: command-line parsing,
+// config resolution, source discovery, transform, ingestion, and the
+// final summary (docs/PLAN.md §3, §4; task T7).
 //
-// Run is the single entry point used by cmd/sard. It parses the
-// "sard ingest <source> [options]" invocation with the stdlib flag
-// package (an append-value helper makes --include/--exclude repeatable),
-// builds the run's log/slog logger from --log-level, resolves
-// configuration (config.Resolve), classifies the input (an existing local
-// directory → source.Local, anything else → source.Git), and runs
-// discovery → transform → ingest sequentially under
-// signal.NotifyContext so Ctrl-C aborts promptly.
+// Run is the single entry point used by cmd/sard. It builds the cobra
+// command tree — the root `sard` command and the `ingest` subcommand,
+// "sard ingest <source> [options]" — and executes it. The flag
+// definitions on the ingest command are the single source of truth for
+// the --help output: cobra renders the usage line and the option list
+// from the same definitions that bind the parsed values, so the two
+// cannot drift apart. pflag parses flags and the positional <source> in
+// any order (both "sard ingest ./docs --dry-run" and
+// "sard ingest --dry-run ./docs" work), and pflag's StringArray type
+// makes --include/--exclude repeatable. Both commands run with
+// SilenceErrors/SilenceUsage set — the framework never prints on its
+// own: usage and error diagnostics come out of Run (exit 2), and
+// everything else through the run's log/slog logger on stderr.
 //
-// Logging goes entirely through that slog logger to stderr — stdout is
-// reserved for --dry-run output — so cmd/sard stays a one-line wrapper
-// around Run and os.Exit.
+// After parsing, the ingest command's RunE (runIngest) builds the
+// run's log/slog logger from --log-level, resolves configuration
+// (config.Resolve), classifies the input (an existing local directory →
+// source.Local, anything else → source.Git), and runs discovery →
+// transform → ingest sequentially under signal.NotifyContext so Ctrl-C
+// aborts promptly.
+//
+// --help prints the auto-generated usage to stdout and exits 0 (cobra's
+// convention); all other output — logging, error diagnostics, usage on
+// errors — goes to stderr, so stdout stays clean for --dry-run payloads.
+// cmd/sard stays a one-line wrapper around Run and os.Exit.
 //
 // Exit codes (docs/PLAN.md §8):
 //
@@ -32,12 +45,12 @@
 //     --source, negative --limit / --max-depth / --max-file-size /
 //     --cc-pair-id, invalid --log-level, an unknown flag, a wrong number
 //     of arguments), an unrecognized input (bad path, invalid git URL
-//     form), or an Onyx 401/403. The auth case is deliberate: the client
-//     fails fast with onyx.ErrAuth because every remaining file would
-//     fail identically, and a rejected key is a credentials problem, so
-//     the run aborts with 2 rather than 1. Missing Onyx credentials are
-//     a configuration error for a real run only; a dry run sends nothing
-//     and needs none.
+//     form), a missing subcommand, or an Onyx 401/403. The auth case is
+//     deliberate: the client fails fast with onyx.ErrAuth because every
+//     remaining file would fail identically, and a rejected key is a
+//     credentials problem, so the run aborts with 2 rather than 1.
+//     Missing Onyx credentials are a configuration error for a real run
+//     only; a dry run sends nothing and needs none.
 //   - 130 — the run was interrupted (SIGINT via signal.NotifyContext).
 //
 // --dry-run never exits 1 (it sends nothing, so no file can fail); a
@@ -64,19 +77,18 @@
 package cli
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
-	"flag"
 	"fmt"
-	"io"
 	"log/slog"
 	"os"
 	"os/signal"
 	"slices"
 	"strings"
 	"time"
+
+	"github.com/spf13/cobra"
 
 	"sardonyx/internal/config"
 	"sardonyx/internal/models"
@@ -103,8 +115,8 @@ type ingestFlags struct {
 	branch      string
 	source      string
 	idBase      string
-	include     stringList
-	exclude     stringList
+	include     []string
+	exclude     []string
 	maxDepth    int
 	maxFileSize int
 	token       string
@@ -113,37 +125,158 @@ type ingestFlags struct {
 	logLevel    string
 }
 
-// newFlagSet defines the `sard ingest` flags of docs/PLAN.md §4 on f
-// and binds them to p. It returns the names of the boolean flags —
-// reorderFlags uses them to decide which flags consume a value token.
-func newFlagSet(f *flag.FlagSet, p *ingestFlags) (boolNames []string) {
+// errNoSubcommand is what the root command's RunE returns when `sard` is
+// invoked without a subcommand (docs/PLAN.md §4: exit 2).
+var errNoSubcommand = errors.New("no subcommand")
+
+// exitCode carries the run's exit code (docs/PLAN.md §8) out of the
+// ingest command's RunE back into Run. The pipeline logs its own
+// diagnostics, so the command runs with SilenceErrors/SilenceUsage set
+// and surfaces the result only this way.
+type exitCode int
+
+func (e exitCode) Error() string {
+	return fmt.Sprintf("run finished with exit code %d", int(e))
+}
+
+// rootUsageTemplate is the root command's usage template: the v1.10
+// default minus the Runnable line (root itself takes no arguments or
+// flags — it only dispatches to subcommands, so a "sard [flags]" line
+// would be misleading).
+const rootUsageTemplate = `Usage:{{if .HasAvailableSubCommands}}
+  {{.CommandPath}} [command]{{end}}{{if gt (len .Aliases) 0}}
+
+Aliases:
+  {{.NameAndAliases}}{{end}}{{if .HasExample}}
+
+Examples:
+{{.Example}}{{end}}{{if .HasAvailableSubCommands}}{{$cmds := .Commands}}{{if eq (len .Groups) 0}}
+
+Available Commands:{{range $cmds}}{{if (or .IsAvailableCommand (eq .Name "help"))}}
+  {{rpad .Name .NamePadding }} {{.Short}}{{end}}{{end}}{{else}}{{range $group := .Groups}}
+
+{{.Title}}{{range $cmds}}{{if (and (eq .GroupID $group.ID) (or .IsAvailableCommand (eq .Name "help")))}}
+  {{rpad .Name .NamePadding }} {{.Short}}{{end}}{{end}}{{end}}{{if not .AllChildCommandsHaveGroup}}
+
+Additional Commands:{{range $cmds}}{{if (and (eq .GroupID "") (or .IsAvailableCommand (eq .Name "help")))}}
+  {{rpad .Name .NamePadding }} {{.Short}}{{end}}{{end}}{{end}}{{end}}{{end}}{{if .HasAvailableLocalFlags}}
+
+Flags:
+{{.LocalFlags.FlagUsages | trimTrailingWhitespaces}}{{end}}{{if .HasAvailableInheritedFlags}}
+
+Global Flags:
+{{.InheritedFlags.FlagUsages | trimTrailingWhitespaces}}{{end}}{{if .HasHelpSubCommands}}
+
+Additional help topics:{{range .Commands}}{{if .IsAdditionalHelpTopicCommand}}
+  {{rpad .CommandPath .CommandPathPadding}} {{.Short}}{{end}}{{end}}{{end}}{{if .HasAvailableSubCommands}}
+
+Use "{{.CommandPath}} [command] --help" for more information about a command.{{end}}
+`
+
+// ingestUsageTemplate is a verbatim copy of cobra v1.10.2's
+// defaultUsageTemplate (cobra does not export it). It is set explicitly
+// on the ingest command because a command inherits its parent's usage
+// template, and the root uses rootUsageTemplate — without this, the
+// root's trimmed template (no UseLine) would render an empty Usage line
+// for "sard ingest --help". Keep in sync with the default in the cobra
+// version pinned in go.mod.
+const ingestUsageTemplate = `Usage:{{if .Runnable}}
+  {{.UseLine}}{{end}}{{if .HasAvailableSubCommands}}
+  {{.CommandPath}} [command]{{end}}{{if gt (len .Aliases) 0}}
+
+Aliases:
+  {{.NameAndAliases}}{{end}}{{if .HasExample}}
+
+Examples:
+{{.Example}}{{end}}{{if .HasAvailableSubCommands}}{{$cmds := .Commands}}{{if eq (len .Groups) 0}}
+
+Available Commands:{{range $cmds}}{{if (or .IsAvailableCommand (eq .Name "help"))}}
+  {{rpad .Name .NamePadding }} {{.Short}}{{end}}{{end}}{{else}}{{range $group := .Groups}}
+
+{{.Title}}{{range $cmds}}{{if (and (eq .GroupID $group.ID) (or .IsAvailableCommand (eq .Name "help")))}}
+  {{rpad .Name .NamePadding }} {{.Short}}{{end}}{{end}}{{end}}{{if not .AllChildCommandsHaveGroup}}
+
+Additional Commands:{{range $cmds}}{{if (and (eq .GroupID "") (or .IsAvailableCommand (eq .Name "help")))}}
+  {{rpad .Name .NamePadding }} {{.Short}}{{end}}{{end}}{{end}}{{end}}{{end}}{{if .HasAvailableLocalFlags}}
+
+Flags:
+{{.LocalFlags.FlagUsages | trimTrailingWhitespaces}}{{end}}{{if .HasAvailableInheritedFlags}}
+
+Global Flags:
+{{.InheritedFlags.FlagUsages | trimTrailingWhitespaces}}{{end}}{{if .HasHelpSubCommands}}
+
+Additional help topics:{{range .Commands}}{{if .IsAdditionalHelpTopicCommand}}
+  {{rpad .CommandPath .CommandPathPadding}} {{.Short}}{{end}}{{end}}{{end}}{{if .HasAvailableSubCommands}}
+
+Use "{{.CommandPath}} [command] --help" for more information about a command.{{end}}
+`
+
+// newRootCmd builds the root `sard` command. It carries no flags of its
+// own; invoked without a subcommand its RunE returns errNoSubcommand
+// and Run prints the auto-generated top-level usage.
+func newRootCmd() *cobra.Command {
+	root := &cobra.Command{
+		Use:           "sard",
+		Short:         "Ingest Markdown files from a git repository or a local directory into Onyx",
+		SilenceErrors: true,
+		SilenceUsage:  true,
+		RunE:          func(cmd *cobra.Command, args []string) error { return errNoSubcommand },
+	}
+	root.SetUsageTemplate(rootUsageTemplate)
+	return root
+}
+
+// newIngestCmd builds the `sard ingest` subcommand (docs/PLAN.md §4):
+// the flags bound to p and a RunE wired to runIngest. The flag
+// definitions are the single source of truth for --help — cobra renders
+// the usage line and the option list from them.
+func newIngestCmd(p *ingestFlags) *cobra.Command {
+	cmd := &cobra.Command{
+		Use:   "ingest <source>",
+		Short: "Ingest a git repository or a local directory into Onyx",
+		Long: `<source> is a git repository URL (https://host/owner/repo,
+git@host:owner/repo, or the owner/repo shorthand for github.com) or a
+local directory path. Every Markdown file (.md, .mdx, .markdown) found
+is converted to an Onyx document and sent to the Ingestion API.
+
+Use --dry-run to print the would-be payloads to stdout — one JSON
+document per file — and send nothing; a dry run needs no Onyx
+credentials.`,
+		Args:          exactlyOneSource,
+		SilenceErrors: true,
+		SilenceUsage:  true,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			if code := runIngest(args[0], p); code != 0 {
+				return exitCode(code)
+			}
+			return nil
+		},
+	}
+	cmd.SetUsageTemplate(ingestUsageTemplate)
+	f := cmd.Flags()
 	f.StringVar(&p.apiURL, "api-url", "", "Onyx API base URL (default: "+config.DefaultAPIURL+"; env: "+config.EnvAPIURL+")")
 	f.StringVar(&p.apiKey, "api-key", "", "Onyx API key (env: "+config.EnvAPIKey+")")
 	f.IntVar(&p.ccPairID, "cc-pair-id", 0, "Onyx connector-credential-pair id (env: "+config.EnvCCPairID+")")
 	f.StringVar(&p.branch, "branch", "", "branch to clone; git sources only")
 	f.StringVar(&p.source, "source", "", "override the document source enum: "+strings.Join(validSources, " | "))
 	f.StringVar(&p.idBase, "id-base", "", "arbitrary document-ID base for this run (env: "+config.EnvIDBase+")")
-	f.Var(&p.include, "include", "include filter, repeatable (e.g. \"docs/**\")")
-	f.Var(&p.exclude, "exclude", "exclude filter, repeatable (on top of the default noise-dir exclusions)")
+	f.StringArrayVar(&p.include, "include", nil, "include filter, repeatable (e.g. \"docs/**\")")
+	f.StringArrayVar(&p.exclude, "exclude", nil, "exclude filter, repeatable (on top of the default noise-dir exclusions)")
 	f.IntVar(&p.maxDepth, "max-depth", 0, "max directory depth below the source root (0 = unlimited)")
 	f.IntVar(&p.maxFileSize, "max-file-size", 1024, "skip files larger than N KiB (0 = unlimited)")
 	f.StringVar(&p.token, "token", "", "git auth token for private repos (env: "+config.EnvGitToken+")")
 	f.BoolVar(&p.dryRun, "dry-run", false, "print the would-be payloads to stdout; send nothing")
-	boolNames = append(boolNames, "dry-run")
 	f.IntVar(&p.limit, "limit", 0, "ingest at most N files (0 = unlimited)")
 	f.StringVar(&p.logLevel, "log-level", "info", "log level: debug | info | warning | error")
-	return boolNames
+	return cmd
 }
 
-// stringList is a flag.Value that appends every occurrence of a flag to
-// a slice — how the repeatable --include / --exclude flags work
-// (docs/PLAN.md §4).
-type stringList []string
-
-func (s *stringList) String() string { return strings.Join(*s, ", ") }
-
-func (s *stringList) Set(v string) error {
-	*s = append(*s, v)
+// exactlyOneSource is the ingest command's argument validator: the form
+// is "sard ingest <source>" — exactly one positional argument.
+func exactlyOneSource(cmd *cobra.Command, args []string) error {
+	if len(args) != 1 {
+		return fmt.Errorf("exactly one <source> argument is required (got %d)", len(args))
+	}
 	return nil
 }
 
@@ -299,95 +432,61 @@ func discover(src string, p *ingestFlags, settings *config.Settings, log *slog.L
 	}, nil
 }
 
-// reorderFlags moves the positional <source> argument(s) to the end of
-// the argument list. The stdlib flag package stops parsing at the first
-// non-flag token, but the §4 form is "sard ingest <source> [options]" —
-// positional first — so the args are re-sorted into flags (with their
-// values) followed by positionals before parsing. Both
-// "sard ingest ./docs --dry-run" and "sard ingest --dry-run ./docs"
-// work. A non-bool flag without an inline "=" consumes the next token
-// as its value even when it starts with "-" (e.g. --limit -1); a
-// "--" terminator ends flag parsing, as in the stdlib.
-func reorderFlags(f *flag.FlagSet, boolNames []string, rest []string) []string {
-	boolSet := make(map[string]bool, len(boolNames))
-	for _, n := range boolNames {
-		boolSet[n] = true
-	}
-	var flags, positionals []string
-	for i := 0; i < len(rest); i++ {
-		a := rest[i]
-		if a == "--" {
-			positionals = append(positionals, rest[i:]...)
-			return append(flags, positionals...)
-		}
-		if len(a) >= 2 && a[0] == '-' {
-			flags = append(flags, a)
-			if eq := strings.IndexByte(a, '='); eq < 2 {
-				name := strings.TrimLeft(a, "-")
-				if fl := f.Lookup(name); fl != nil && !boolSet[name] {
-					i++
-					if i < len(rest) {
-						flags = append(flags, rest[i])
-					}
-				}
-			}
-			continue
-		}
-		positionals = append(positionals, a)
-	}
-	return append(flags, positionals...)
-}
-
-// printTopLevelUsage prints the top-level usage shown for a wrong
-// subcommand or a missing <source> argument (docs/PLAN.md §4).
-func printTopLevelUsage(w io.Writer) {
-	fmt.Fprintln(w, "usage: sard ingest <source> [options]")
-	fmt.Fprintln(w)
-	fmt.Fprintln(w, "  <source>   a git repository URL (https://host/owner/repo,")
-	fmt.Fprintln(w, "             git@host:owner/repo, or the owner/repo shorthand")
-	fmt.Fprintln(w, "             for github.com) or a local directory path")
-	fmt.Fprintln(w)
-	fmt.Fprintln(w, "run 'sard ingest --help' for the full option list")
-}
-
-// Run executes one `sard ingest` invocation and returns the exit code
-// per docs/PLAN.md §8 (see the package doc). It owns everything between
-// the command line and the process exit: flag parsing, the slog logger
-// (from --log-level, writing to stderr), the signal context for Ctrl-C,
-// and the pipeline. cmd/sard only maps the returned code to os.Exit.
+// Run executes one `sard` invocation and returns the exit code per
+// docs/PLAN.md §8 (see the package doc). It builds the cobra command
+// tree (root `sard` + the `ingest` subcommand), executes it, and maps
+// the outcome: --help (and the built-in help command) printed usage and
+// exit 0; the pipeline's own exit code (0/1/2/130, all diagnostics
+// logged by the pipeline itself); a missing or unknown subcommand, and
+// any flag/argument error on `sard ingest`, exit 2 with the relevant
+// usage on stderr (the auto-generated top-level usage for root-level
+// problems, the ingest usage for ingest-level ones). cmd/sard only maps
+// the returned code to os.Exit.
 func Run(args []string) int {
-	if len(args) == 0 || args[0] != "ingest" {
-		printTopLevelUsage(os.Stderr)
+	root := newRootCmd()
+	root.AddCommand(newIngestCmd(&ingestFlags{}))
+	root.SetArgs(args)
+
+	cmd, err := root.ExecuteC()
+	if err == nil {
+		return 0 // --help: usage printed, no error
+	}
+	var ec exitCode
+	switch {
+	case errors.As(err, &ec):
+		return int(ec)
+	case cmd == root:
+		// `sard` without a subcommand (the root's RunE returned
+		// errNoSubcommand) or `sard <bogus>` (cobra's unknown-command
+		// error): the auto-generated top-level usage on stderr, exit 2.
+		// InitDefaultHelpFlag makes the -h line render identically on
+		// both paths (it is normally initialized only once execute runs).
+		root.InitDefaultHelpFlag()
+		fmt.Fprintln(os.Stderr, root.UsageString())
+		return 2
+	default:
+		// A flag or argument error on `sard ingest`: the standard
+		// diagnostic plus the full ingest usage, exit 2.
+		w := cmd.ErrOrStderr()
+		fmt.Fprintln(w, cmd.ErrPrefix(), err)
+		fmt.Fprintln(w, cmd.UsageString())
 		return 2
 	}
+}
 
-	var p ingestFlags
-	f := flag.NewFlagSet("sard ingest", flag.ContinueOnError)
-	boolNames := newFlagSet(f, &p)
-	msgs := &bytes.Buffer{} // the flag package writes parse diagnostics and usage here
-	f.SetOutput(msgs)
-	if err := f.Parse(reorderFlags(f, boolNames, args[1:])); err != nil {
-		fmt.Fprint(os.Stderr, msgs.String()) // the flag package's own diagnostics + usage
-		if errors.Is(err, flag.ErrHelp) {
-			return 0 // --help: usage printed, not an error
-		}
-		return 2
-	}
-
-	if f.NArg() != 1 {
-		fmt.Fprintf(os.Stderr, "error: exactly one <source> argument is required (got %d)\n", f.NArg())
-		f.Usage()
-		fmt.Fprint(os.Stderr, msgs.String())
-		return 2
-	}
-	src := f.Arg(0)
-
+// runIngest runs the pipeline for one `sard ingest <source>`
+// invocation (the ingest command's RunE body) and returns the exit code
+// per docs/PLAN.md §8 (see the package doc): build the logger from
+// --log-level, validate the flag values, resolve configuration, run
+// discovery under a signal-aware context, then the dry-run printer or
+// the ingest loop.
+func runIngest(src string, p *ingestFlags) int {
 	log, err := buildLogger(p.logLevel)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "error: %v\n", err)
 		return 2
 	}
-	if err := validate(&p); err != nil {
+	if err := validate(p); err != nil {
 		log.Error(err.Error())
 		return 2
 	}
@@ -411,7 +510,7 @@ func Run(args []string) int {
 	// for a git source the clone dominates, so the clock starts before
 	// discovery, not before the ingest loop.
 	start := time.Now()
-	d, err := discover(src, &p, settings, log)
+	d, err := discover(src, p, settings, log)
 	if err != nil {
 		log.Error(err.Error())
 		if config.IsConfigurationError(err) {
@@ -450,8 +549,8 @@ func Run(args []string) int {
 // compact JSON document per line, in the source's stable RelPath order —
 // and sends nothing. It ends with a summary on stderr (docs/PLAN.md §8):
 // the total, the number of payloads printed, the skipped count from
-// discovery, and the whole-run elapsed time. stdout stays strictly
-// "one JSON payload per file."
+// discovery, and the whole-run elapsed time. stdout stays strictly "one
+// JSON payload per file."
 func runDry(ctx context.Context, files []models.IngestedFile, docSource string, ccPairID int, idBase string, skipped int, elapsed time.Duration, log *slog.Logger) int {
 	var printed int
 	for _, f := range files {
@@ -481,8 +580,8 @@ func runDry(ctx context.Context, files []models.IngestedFile, docSource string, 
 // summaryHeader renders the header line of the end-of-run summary
 // (docs/PLAN.md §8): the verb, the total number of files processed in
 // this run (--limit already applied), the whole-run elapsed time (the
-// timer starts in Run, before discovery — the git clone dominates), and
-// the outcome counts (created/updated/skipped/failed for a real run,
+// timer starts in runIngest, before discovery — the git clone dominates),
+// and the outcome counts (created/updated/skipped/failed for a real run,
 // payloads printed plus skipped for a dry run). Each failed file
 // additionally gets a follow-up line (ingestAll).
 func summaryHeader(verb string, elapsed time.Duration, total int, counts string) string {
