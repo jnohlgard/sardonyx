@@ -2,7 +2,7 @@
 //
 // Git (below) clones a repository shallowly — `git clone --depth 1` into
 // a fresh temporary directory, removed on exit — discovers the tracked
-// markdown files via `git ls-files` (the repository's own .gitignore is
+// Markdown files via `git ls-files` (the repository's own .gitignore is
 // respected for free), and returns them as models.IngestedFile records
 // with git provenance.
 //
@@ -339,7 +339,7 @@ type GitResult struct {
 }
 
 // Git clones the repository at src (docs/PLAN.md §5.2, §5.4) and
-// returns its markdown files (.md, .mdx, .markdown) as
+// returns its Markdown files (.md, .mdx, .markdown) as
 // models.IngestedFile records.
 //
 // src is one of NormalizeURL's input forms — an https URL, a git@ ssh
