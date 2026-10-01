@@ -1,9 +1,9 @@
 # sardonyx — Implementation Plan
 
-**Status:** 🚧 T1–T9 complete (config, models, transform, local directory
+**Status:** ✅ T1–T10 complete (config, models, transform, local directory
 source, git repository source, Onyx client, CLI wiring, summary &
-polish, test hardening); next up is T10 (Build & README). Implement
-task T10 in §10; no stub packages remain.
+polish, test hardening, build & README). All tasks in §10 are done;
+no stub packages remain.
 
 **Language:** Go (switched from Python, 2026-10 — motivation: a single static
 binary that needs no interpreter or virtualenv on the target machine). The
@@ -124,7 +124,8 @@ Options
   --max-depth N    Max directory depth below the source root
   --max-file-size  Skip files larger than N KiB (default 1024)
   --token          Git auth token for private repos (env GIT_TOKEN); injected as x-access-token in the HTTPS URL
-  --dry-run        Print payloads to stdout; send nothing
+  --dry-run        Print payloads to stdout; send nothing (needs no Onyx
+                   credentials — see the T10 decision below)
   --limit N        Ingest at most N files (smoke-testing)
   --log-level      debug | info | warning | error (default info)
 ```
@@ -198,8 +199,9 @@ Decisions made while implementing T9 (test hardening):
   redact), plus ≥ 90% for the `config` and `transform` packages.
   After T9: all ten functions at 100% (both known gaps closed — the
   `url.Parse` error branch, `stripGitSuffix`'s slash-less path),
-  `config` at 93.5%, `transform` at 100%. T10 inherits this
-  reading of the acceptance line.
+  `config` at 93.5%, `transform` at 100%. T10 inherits this reading
+  of the acceptance line and leaves it unchanged (the dry-run
+  pre-flight addition lands `config` at 93.6%).
 - **"Very long single file" (Q2).** Interpreted as (a) a large
   (512 KiB) single-line, in-limit file ingests cleanly with a stable
   ID and the basename title, and (b) the oversize boundary: a file
@@ -222,7 +224,26 @@ Decisions made while implementing T9 (test hardening):
   still be picked up by the naive scan; a fence-aware title is a v2
   item, not a T9 fix.
 
-Examples (to be documented in README once implemented):
+Decisions made while implementing T10 (build & README):
+
+- **A dry run needs no Onyx credentials.** The pre-flight used to
+  require `ONYX_API_KEY` and `ONYX_CC_PAIR_ID` for every invocation,
+  which blocked T10's acceptance line (a fresh checkout must run
+  `sard ingest <dir> --dry-run` with zero configuration). A dry run
+  sends nothing, so the requirement no longer applies to it:
+  `config.Flags` carries a `DryRun` marker and `Resolve` skips the two
+  required-value checks when it is set. A cc-pair id that is *present*
+  but not an integer is still an error in both modes (the validation is
+  kept; the requirement is not). A dry run without one prints
+  `"cc_pair_id":0`; providing a value puts it in the preview. `--token`
+  / `GIT_TOKEN` is still honoured for dry runs of git sources — the
+  clone authenticates even though no ingest does. Tests: the config
+  pre-flight in both modes and a zero-credentials cli dry run.
+- **No release pipeline.** There is no artifact to link, so the README
+  documents building from source (the static-build recipe, and
+  `go install sardonyx/cmd/sard` from a checkout) and says so.
+
+Examples (documented in the README's Getting started):
 
 ```bash
 sard ingest https://github.com/onyx-dot-app/onyx --cc-pair-id 42
@@ -408,9 +429,12 @@ Implementation decisions (T6, recorded after the fact):
 | ---- | ------------------------------------------------------------------- |
 | 0    | Run completed; all discovered files ingested successfully (or 0 files found, with a warning) |
 | 1    | Run completed but ≥1 file failed to ingest                          |
-| 2    | Configuration error (missing api key / cc_pair_id, bad path, bad flags) |
+| 2    | Configuration error (missing api key / cc_pair_id — real runs only, bad path, bad flags) |
 | 130  | Interrupted (Ctrl-C)                                                |
 
+- A `--dry-run` is the one case that needs no Onyx credentials: it
+  sends nothing, so a missing API key / cc-pair id is not a
+  configuration error for it (decision, §4 T10).
 - Ctrl-C: `main` runs the pipeline under `signal.NotifyContext(context.Background(),
   os.Interrupt)`; on interrupt, exit with 130.
 - Per-file failures are logged, recorded in the summary, and do not abort the run.
@@ -434,7 +458,7 @@ Implementation decisions (T6, recorded after the fact):
 ```
 sardonyx/
 ├── go.mod                       # module sardonyx (deps: godotenv, doublestar/v4)
-├── README.md                    # project overview, setup, usage (filled in as tasks land)
+├── README.md                    # project overview, getting started, build, usage
 ├── .env.example                 # ONYX_API_KEY / ONYX_API_URL / ONYX_CC_PAIR_ID / GIT_TOKEN
 ├── .gitignore
 ├── docs/
@@ -551,8 +575,17 @@ Run with `go test ./...`.
     -o sard ./cmd/sard`; README quickstart (prebuilt binary or `go install
     sardonyx/cmd/sard`), prerequisites (API key, CC-pair creation walkthrough), and the
     stale-document limitation.
-  - Accept: ⬜ fresh checkout → `go build ./...` → `./sard ingest … --dry-run` works from
-    the README instructions.
+  - Accept: ✅ verified from a clean tree: `go build ./…` succeeds;
+    `CGO_ENABLED=0 go build -ldflags "-X main.version=1.0.0" -o sard
+    ./cmd/sard` yields a static binary (`file sard` → "statically
+    linked"); `./sard ingest ./internal/source/testdata/local
+    --dry-run` exits 0 with one valid JSON payload per file, no
+    network, and no Onyx credentials (a dry run needs none — the
+    enabling config pre-flight change, decision in §4); both README
+    examples (local directory and git URL) followed literally exit 0.
+    No Go behavior changes beyond that enabling change; the coverage
+    reading above is unchanged by T10 (config 93.6%, transform 100%,
+    all ten normalization functions 100%).
 
 ---
 
@@ -561,7 +594,7 @@ Run with `go test ./...`.
 | # | Item | Current call |
 | - | ---- | ------------ |
 | 1 | **Stale documents**: Ingestion API has no delete → removed files persist in Onyx. | Accept for v1; document clearly; future: Onyx document-deletion API or periodic full prune if one exists. |
-| 2 | **CC-pair prerequisite**: user must create a Connector (e.g. a File Connector) in the Admin Panel and read the `cc_pair_id` from the URL. | Document step-by-step in README (task T10). |
+| 2 | **CC-pair prerequisite**: user must create a Connector (e.g. a File Connector) in the Admin Panel and read the `cc_pair_id` from the URL. | Documented — the README's Getting started carries the step-by-step walkthrough (T10); the prerequisite itself stays user-side. |
 | 3 | **Cloud rate limits** on `cloud.onyx.app` for bulk ingests. | Sequential + backoff on 429; `--limit` for chunked runs. |
 | 4 | **Tags**: `metadata` values become Onyx tags; free-form values may be noise in UI. | Keep metadata conservative (repo, path, commit); tags via future `--tag` flag. |
 | 5 | **Branch/tag targeting**: `--branch` covers branches; tags are a small extension (git handles both in `--branch`). | Support via `--branch` (git accepts refs). |
