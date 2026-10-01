@@ -362,9 +362,9 @@ func TestSectionLink(t *testing.T) {
 }
 
 // gitFixtureRepo builds a small fixture repository in a fresh temp
-// directory: three committed markdown files (README.md, docs/intro.md,
+// directory: three committed Markdown files (README.md, docs/intro.md,
 // guide.mdx) in two commits with fixed committer dates, a gitignored
-// scratch.md, and a non-markdown notes.txt. It returns the repo root,
+// scratch.md, and a non-Markdown notes.txt. It returns the repo root,
 // and the SHA + committer time of each commit.
 //
 // The fixture is built in a temp directory — never committed under
@@ -455,7 +455,7 @@ func TestGit(t *testing.T) {
 	}
 
 	// Tracked-only discovery: scratch.md (gitignored) and notes.txt
-	// (non-markdown) are absent; the .md/.mdx set is present, sorted
+	// (non-Markdown) are absent; the .md/.mdx set is present, sorted
 	// by RelPath.
 	files := wantPaths(t, res.Files, "README.md", "docs/intro.md", "guide.mdx")
 
