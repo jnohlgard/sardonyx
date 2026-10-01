@@ -1,4 +1,4 @@
-# sardonyx
+# Sardonyx
 
 Ingest **Markdown files** from a **git repository URL** or a **local directory** into
 [Onyx](https://onyx.app) via the [Ingestion API](https://docs.onyx.app/developers/guides/index_files_ingestion_api).
@@ -9,7 +9,7 @@ Ingest **Markdown files** from a **git repository URL** or a **local directory**
 
 ## Why the name
 
-**Sardonyx** is a red-and-black banded variety of onyx (both are forms of
+**sardonyx** is a red-and-black banded variety of onyx (both are forms of
 chalcedony) — the repo and Go module carry the full name, while the
 command line tool is simply **`sard`**, the stone's own name: short, easy to
 type, and unambiguous as a CLI. It builds to a single static binary: no
