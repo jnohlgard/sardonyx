@@ -1,9 +1,9 @@
 # sardonyx — Implementation Plan
 
-**Status:** 🚧 T1–T6 complete (config, models, transform, local directory
-source, git repository source, Onyx client); next up is T7 (CLI wiring).
-Implement tasks T7–T10 in §10 in order; the remaining stub packages each
-have a TODO naming their task.
+**Status:** 🚧 T1–T7 complete (config, models, transform, local directory
+source, git repository source, Onyx client, CLI wiring); next up is
+T8 (Summary & polish). Implement tasks T8–T10 in §10 in order; no stub
+packages remain — T8 refines the summary output in `internal/cli`.
 
 **Language:** Go (switched from Python, 2026-10 — motivation: a single static
 binary that needs no interpreter or virtualenv on the target machine). The
@@ -134,6 +134,30 @@ Implementation notes:
 - Single subcommand, so stdlib `flag` is used (no CLI framework). The repeatable
   `--include` / `--exclude` flags are a small append-value helper.
 - Logging via `log/slog` (level from `--log-level`); log output goes to stderr.
+
+Decisions made while implementing T7 (recorded in the `internal/cli` package doc):
+
+- `cli.Run(args) (exitCode int)` keeps the stub's signature. The pipeline logs
+  everything through a `*slog.Logger` built by `Run` from `--log-level` (stderr);
+  `cmd/sard/main.go` prints nothing and only maps the returned code to `os.Exit`.
+- Bad flag values — unknown `--source`, negative `--limit` / `--max-depth` /
+  `--max-file-size` / `--cc-pair-id`, invalid `--log-level`, unknown flags, a
+  wrong number of arguments, and unrecognized inputs (bad path, invalid git URL
+  form) — are all configuration errors, exit 2, checked in one pre-flight step.
+- `--dry-run` exits 0 whenever discovery succeeds (it sends nothing, so no file
+  can fail; exit 1 applies to real ingestion runs only). A discovery error in
+  dry-run still exits 2.
+- `--limit N` caps the number of files ingested — and the number of payloads
+  printed in a dry-run — without changing the summary wording.
+- `--branch` and `--token` are git-only flags: for a local directory input they
+  are ignored with a warning (their values are never logged).
+- An Onyx 401/403 (`onyx.ErrAuth`) aborts the run with exit **2**: a rejected
+  key is a credentials problem, and every remaining file would fail identically
+  (see §7 fail-fast, §8).
+- The stdlib `flag` package stops parsing at the first positional argument, but
+  the form above puts `<source>` first; `Run` therefore re-sorts the arguments
+  into flags (with their values) plus positionals before parsing, so both
+  `sard ingest ./docs --dry-run` and `sard ingest --dry-run ./docs` work.
 
 Examples (to be documented in README once implemented):
 
@@ -327,6 +351,9 @@ Implementation decisions (T6, recorded after the fact):
 - Ctrl-C: `main` runs the pipeline under `signal.NotifyContext(context.Background(),
   os.Interrupt)`; on interrupt, exit with 130.
 - Per-file failures are logged, recorded in the summary, and do not abort the run.
+- Onyx authentication failures (401/403, `onyx.ErrAuth`) abort the run with 2:
+  the client fails fast on the first such file because every remaining file
+  would fail identically (§7) — a credentials problem, not a per-file failure.
 - Summary printed at the end: counts of `created`, `updated`, `skipped` (size/empty),
   `failed` (with file + reason), plus total file count and elapsed time.
 
@@ -418,10 +445,19 @@ Run with `go test ./...`.
     millisecond scale via the injectable backoff field (production keeps
     1 s / 4 s / 16 s); the whole onyx suite runs in ~1 s.
 - **T7 — CLI wiring** (`internal/cli/`, `cmd/sard/`)
-  - stdlib `flag` per §4 (append-value helper for repeatable `--include`/`--exclude`),
-    `log/slog` logging; pipeline: resolve source → discover → transform → ingest → summary.
-  - Accept: ⬜ `--dry-run` prints valid JSON payloads; exit codes per §8; end-to-end smoke
-    test against the mock server.
+  - stdlib `flag` per §4 (append-value helper for the repeatable
+    `--include`/`--exclude`), `log/slog` logging; pipeline: resolve source →
+    discover → transform → ingest → summary.
+  - Accept: ✅ `--dry-run` prints one valid JSON payload per discovered file to
+    stdout (stable order, deterministic IDs) and sends nothing; exit codes per
+    §8 verified in `cli_test.go` — 0 (all OK, 0 files with a warning, successful
+    dry-run), 1 (≥1 failed file; a 400 fails per-file without aborting), 2
+    (missing API key / cc-pair-id, bad path, bad flag values including `--source`
+    and non-int/negative ints, unknown subcommand, and a 401/403 auth abort),
+    130 (SIGINT); end-to-end smoke tests invoke `Run` — the same entry function
+    the binary uses — against a `net/http/httptest` mock with temp-dir fixtures,
+    including a `file://` git-style ingest with git provenance (skipped without
+    a git binary).
 - **T8 — Summary & polish**
   - Clean summary output (counts, elapsed, failure list); `--limit`; progress line per file.
   - Accept: ⬜ manual run against a real Onyx instance (or recorded mock) matches expectations.
