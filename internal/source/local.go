@@ -1,6 +1,6 @@
 // Local directory source (docs/PLAN.md §5.3, task T4).
 //
-// Local discovers the markdown files (.md, .mdx, .markdown) under a
+// Local discovers the Markdown files (.md, .mdx, .markdown) under a
 // directory and returns them as models.IngestedFile records. When the
 // directory (or an ancestor) is a git repository, discovery prefers
 // `git ls-files` — tracked files only, the repository's own .gitignore
@@ -85,7 +85,7 @@ type LocalResult struct {
 	Skipped int
 }
 
-// Local discovers the markdown files (.md, .mdx, .markdown) under dir and
+// Local discovers the Markdown files (.md, .mdx, .markdown) under dir and
 // returns them as models.IngestedFile records (docs/PLAN.md §5.3, §5.4).
 //
 // dir must exist and be a directory; otherwise Local returns an error
@@ -173,7 +173,7 @@ func findGitRoot(dir string) string {
 }
 
 // gitListMarkdown runs `git ls-files` with CWD = root and returns the
-// tracked markdown files as slash-separated paths relative to root. Only
+// tracked Markdown files as slash-separated paths relative to root. Only
 // tracked files are listed, so the repository's .gitignore is respected
 // for free (docs/PLAN.md §5.2, §5.3). Default noise-dir exclusions are not
 // applied here — that is a walk-mode concern.
@@ -202,7 +202,7 @@ func gitListMarkdown(root string) ([]string, error) {
 	return files, nil
 }
 
-// walkMarkdown lists the markdown files under root via filepath.WalkDir,
+// walkMarkdown lists the Markdown files under root via filepath.WalkDir,
 // returning slash-separated paths relative to root. The default noise-dir
 // exclusions and MaxDepth pruning are applied during the walk; the
 // include/exclude globs and the per-file filters run in collectFiles.
