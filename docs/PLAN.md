@@ -1,9 +1,9 @@
 # sardonyx — Implementation Plan
 
-**Status:** 🚧 T1–T7 complete (config, models, transform, local directory
-source, git repository source, Onyx client, CLI wiring); next up is
-T8 (Summary & polish). Implement tasks T8–T10 in §10 in order; no stub
-packages remain — T8 refines the summary output in `internal/cli`.
+**Status:** 🚧 T1–T8 complete (config, models, transform, local directory
+source, git repository source, Onyx client, CLI wiring, summary &
+polish); next up is T9 (Test hardening). Implement tasks T9–T10 in §10
+in order; no stub packages remain.
 
 **Language:** Go (switched from Python, 2026-10 — motivation: a single static
 binary that needs no interpreter or virtualenv on the target machine). The
@@ -148,7 +148,8 @@ Decisions made while implementing T7 (recorded in the `internal/cli` package doc
   can fail; exit 1 applies to real ingestion runs only). A discovery error in
   dry-run still exits 2.
 - `--limit N` caps the number of files ingested — and the number of payloads
-  printed in a dry-run — without changing the summary wording.
+  printed in a dry-run — and the summary's total (the T8 summary describes
+  the capped set; the skipped count comes from discovery, pre-limit).
 - `--branch` and `--token` are git-only flags: for a local directory input they
   are ignored with a warning (their values are never logged).
 - An Onyx 401/403 (`onyx.ErrAuth`) aborts the run with exit **2**: a rejected
@@ -158,6 +159,32 @@ Decisions made while implementing T7 (recorded in the `internal/cli` package doc
   the form above puts `<source>` first; `Run` therefore re-sorts the arguments
   into flags (with their values) plus positionals before parsing, so both
   `sard ingest ./docs --dry-run` and `sard ingest --dry-run ./docs` work.
+
+Decisions made while implementing T8 (summary & polish):
+
+- **Skipped count.** `source.LocalResult` and `source.GitResult` now carry a
+  `Skipped` count: files dropped by a per-file check (oversize, binary,
+  empty, unreadable; the git source also counts files without commit
+  metadata). Each drop already warns per file; the count feeds the summary
+  and the 0-files warning. Files outside the depth/include/exclude scope are
+  not counted — that is deliberate scoping, not a skip.
+- **Elapsed scope.** The summary's elapsed time spans the whole run — the
+  timer starts in `Run` before discovery (for a git source the clone
+  dominates), not just the ingest loop.
+- **Summary shape.** The end of every run prints a header line plus one
+  follow-up line per failed file, each a separate slog record — a single
+  multi-line message would be `\n`-escaped by the TextHandler, defeating
+  the purpose. The header is `run complete: <N> files in <elapsed> —
+  created <c>, updated <u>, skipped <s>, failed <f>`; the failure lines are
+  `  failed: <file> — <reason>`, in ingestion (RelPath) order. A dry run
+  reports `dry run complete: … printed <p> payloads, skipped <s>` instead;
+  an interrupted run prints the ingest shape with `run interrupted` at warn
+  level. The live per-file failure warn is kept (it is the progress feed);
+  the summary re-lists the failures in one place, as §8 requires.
+- **Testing the summary.** A real Onyx instance is not available; the
+  `httptest` mock is the reference for the summary (recorded in the T8
+  acceptance line). The harness captures stderr as well as stdout, so the
+  summary is asserted like any other output.
 
 Examples (to be documented in README once implemented):
 
@@ -354,8 +381,15 @@ Implementation decisions (T6, recorded after the fact):
 - Onyx authentication failures (401/403, `onyx.ErrAuth`) abort the run with 2:
   the client fails fast on the first such file because every remaining file
   would fail identically (§7) — a credentials problem, not a per-file failure.
-- Summary printed at the end: counts of `created`, `updated`, `skipped` (size/empty),
-  `failed` (with file + reason), plus total file count and elapsed time.
+- Summary printed at the end of every run (info level; warn when the run was
+  interrupted): a header line with the total file count, the whole-run elapsed
+  time (discovery to final action — the git clone dominates), and the
+  `created` / `updated` / `skipped` (per-file checks) / `failed` counts — a
+  dry run reports the payloads printed and `skipped` instead — followed by
+  one `failed: <file> — <reason>` line per failed file in ingestion order.
+  During a real run, every file also gets a progress line
+  `[i/N] <file> → created|updated|failed`. All of it goes to stderr; stdout
+  stays reserved for `--dry-run` JSON.
 
 ---
 
@@ -460,7 +494,14 @@ Run with `go test ./...`.
     a git binary).
 - **T8 — Summary & polish**
   - Clean summary output (counts, elapsed, failure list); `--limit`; progress line per file.
-  - Accept: ⬜ manual run against a real Onyx instance (or recorded mock) matches expectations.
+  - Accept: ✅ the recorded mock is the reference (no real Onyx instance is
+    available): `cli_test.go` asserts, from captured stderr, the progress
+    lines and the summary header (total, created, updated, skipped, failed,
+    well-formed elapsed) for a successful run; the failure list in ingestion
+    order; the skipped count and the 0-files warning's skipped attribute;
+    dry-run stdout strictly JSON payloads with the summary on stderr; the
+    `--limit` totals (ingest and dry run); and the warn-level interrupted
+    summary (exit 130).
 - **T9 — Test hardening**
   - Edge cases: CRLF, non-UTF-8, very long single file, monorepo depth, `.mdx` frontmatter.
   - Accept: ⬜ full `go test ./...` green; `go test -cover` ≥ 90 % on the pure-function

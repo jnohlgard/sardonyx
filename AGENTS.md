@@ -4,11 +4,11 @@
 git repo URL or a local directory into Onyx via the Ingestion API.
 
 ## Status
-- T1–T7 are complete (config, models, transform, local directory source,
-  git repository source, Onyx client, CLI wiring). Next up is T8 (Summary
-  & polish — summary formatting, elapsed time, progress lines in
-  `internal/cli`), then T9–T10 in `docs/PLAN.md` order. No stub packages
-  remain.
+- T1–T8 are complete (config, models, transform, local directory source,
+  git repository source, Onyx client, CLI wiring, summary & polish —
+  progress lines, summary with elapsed time and failure list, and the
+  source layer's skipped count). Next up is T9 (test hardening), then T10,
+  in `docs/PLAN.md` order. No stub packages remain.
 
 ## Naming
 - Repo/Go module is `sardonyx`; the binary and command are `sard`.

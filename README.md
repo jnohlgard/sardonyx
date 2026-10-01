@@ -4,9 +4,9 @@ Ingest **markdown files** from a **git repository URL** or a **local directory**
 [Onyx](https://onyx.app) via the [Ingestion API](https://docs.onyx.app/developers/guides/index_files_ingestion_api).
 
 > **Status:** 🚧 In implementation — the design lives in [`docs/PLAN.md`](docs/PLAN.md).
-> Tasks T1–T7 (config, models, transform, local directory source, git
-> repository source, Onyx client, CLI wiring) are complete; T8–T10 are
-> still to do (summary polish, test hardening, build & README).
+> Tasks T1–T8 (config, models, transform, local directory source, git
+> repository source, Onyx client, CLI wiring, summary & polish) are
+> complete; T9–T10 are still to do (test hardening, build & README).
 > See the task list in `docs/PLAN.md` §10.
 
 ## Why the name
