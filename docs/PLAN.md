@@ -1,4 +1,4 @@
-# sardonyx — Implementation Plan
+# Sardonyx — Implementation Plan
 
 **Status:** ✅ T1–T10 complete (config, models, transform, local directory
 source, git repository source, Onyx client, CLI wiring, summary &
