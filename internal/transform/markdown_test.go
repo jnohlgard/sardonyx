@@ -165,6 +165,10 @@ func TestHeadingTitle(t *testing.T) {
 		{"leading whitespace before heading", withContent("\n   # Spaced"), "Spaced"},
 		{"hash without space is not a heading", withContent("#NoSpace\n## Still not"), "plan.md"},
 		{"no heading falls back to basename", withContent("Just prose, no heading."), "plan.md"},
+		// CRLF (T9 edge case): the \r at the end of a heading line is
+		// trimmed away — the title never carries a trailing \r.
+		{"CRLF right after the heading line", withContent("# Title\r\n"), "Title"},
+		{"CRLF heading mid-file", withContent("Preamble line\r\n## Sub\r\n# Real title\r\nmore"), "Real title"},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
@@ -172,6 +176,23 @@ func TestHeadingTitle(t *testing.T) {
 				t.Errorf("Title = %q, want %q", got, tc.want)
 			}
 		})
+	}
+}
+
+// TestCRLFPreserved: CRLF content passes through the transform byte for
+// byte — the section text is the file's content verbatim, \r and all
+// (T9 edge case: CRLF).
+func TestCRLFPreserved(t *testing.T) {
+	f := localFile()
+	const crlf = "# Title\r\nline one\r\nline two\r\n"
+	f.Content = crlf
+
+	got := ToOnyxPayload(f, models.DocumentSourceFile, 42, "base")
+	if got.Document.Sections[0].Text != crlf {
+		t.Errorf("section text = %q, want the CRLF content verbatim %q", got.Document.Sections[0].Text, crlf)
+	}
+	if got.Document.Title != "Title" {
+		t.Errorf("Title = %q, want %q (no trailing \\r)", got.Document.Title, "Title")
 	}
 }
 

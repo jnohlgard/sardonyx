@@ -273,6 +273,24 @@ func TestLocalWalk(t *testing.T) {
 	})
 }
 
+// TestLocalCRLF: CRLF line endings round-trip through discovery — the
+// \r bytes are valid UTF-8, so repairUTF8 must leave them alone, and the
+// record's Content is the file's exact bytes (T9 edge case: CRLF).
+func TestLocalCRLF(t *testing.T) {
+	root := t.TempDir()
+	const crlf = "# Crlf\r\nline one\r\nline two\r\n"
+	writeTree(t, root, map[string]string{"crlf/win.md": crlf})
+
+	res, err := Local(root, LocalOptions{}, discard())
+	if err != nil {
+		t.Fatalf("Local: %v", err)
+	}
+	files := wantPaths(t, res.Files, "crlf/win.md")
+	if got := files[0].Content; got != crlf {
+		t.Errorf("Content = %q, want the CRLF bytes preserved exactly %q", got, crlf)
+	}
+}
+
 // runGit runs git with dir as CWD, failing the test on non-zero exit.
 func runGit(t *testing.T, dir string, args ...string) {
 	t.Helper()

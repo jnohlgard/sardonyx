@@ -600,6 +600,51 @@ func TestGitValidation(t *testing.T) {
 	}
 }
 
+// hermeticGitConfig makes the test's git subprocesses ignore the machine's
+// global/system configuration (autocrlf, user, …) by pointing them at an
+// empty global config. t.Setenv is inherited by every exec'd git command.
+func hermeticGitConfig(t *testing.T) {
+	t.Helper()
+	t.Setenv("GIT_CONFIG_GLOBAL", filepath.Join(t.TempDir(), "global"))
+	t.Setenv("GIT_CONFIG_SYSTEM", filepath.Join(t.TempDir(), "system"))
+}
+
+// TestGitCRLF: CRLF bytes committed to a fixture repository survive the
+// shallow clone — the record's Content keeps the \r bytes exactly
+// (T9 edge case: CRLF on the git path).
+//
+// The fixture repo sets core.autocrlf=false before committing so the
+// blobs store the CRLF bytes as written, and hermeticGitConfig pins the
+// clone's checkout to the same (the machine's own config could otherwise
+// rewrite line endings, e.g. a global autocrlf=true on Windows).
+func TestGitCRLF(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git not on PATH (a runtime dependency, docs/PLAN.md §12)")
+	}
+	hermeticGitConfig(t)
+
+	root := t.TempDir()
+	runGit(t, root, "init", "-q", "-b", "main", ".")
+	runGit(t, root, "config", "core.autocrlf", "false")
+	const crlf = "# Crlf\r\nline one\r\nline two\r\n"
+	writeTree(t, root, map[string]string{"crlf/win.md": crlf})
+	runGit(t, root, "add", "crlf/win.md")
+	runGit(t, root, "-c", "user.name=test", "-c", "user.email=test@example.com",
+		"commit", "-q", "-m", "crlf file")
+
+	res, err := Git(root, GitOptions{Branch: "main"}, discard())
+	if err != nil {
+		t.Fatalf("Git: %v", err)
+	}
+	files := wantPaths(t, res.Files, "crlf/win.md")
+	if got := files[0].Content; got != crlf {
+		t.Errorf("Content = %q, want the CRLF bytes preserved exactly %q", got, crlf)
+	}
+	if res.Skipped != 0 {
+		t.Errorf("Skipped = %d, want 0", res.Skipped)
+	}
+}
+
 // authServer is a minimal git-over-http endpoint: the first request
 // (no credentials) gets a 401 challenge; a request that presents
 // credentials gets a 404, so the clone fails deterministically and
