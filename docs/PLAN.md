@@ -143,7 +143,7 @@ sard ingest https://github.com/org/repo --include "docs/**" --dry-run
 
 ### 5.1 Configuration resolution
 
-Priority: **CLI flag > environment variable > `.env` file (project root) > default**.
+Priority: **CLI flag > environment variable > `.env` file (current working directory) > default**.
 Env vars: `ONYX_API_URL`, `ONYX_API_KEY`, `ONYX_CC_PAIR_ID`, `GIT_TOKEN`.
 `.env` loading via `github.com/joho/godotenv`; a missing `.env` is not an error.
 Resolved into a `config.Settings` struct (T1); required values missing after all sources
