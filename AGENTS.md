@@ -20,4 +20,8 @@ git repo URL or a local directory into Onyx via the Ingestion API.
 - Python ≥3.10; src layout; dependencies only in `pyproject.toml`; tests via pytest (+respx).
 - Config precedence: CLI flag > env var > `.env`; `.env` is never committed.
 - Never log or echo the Onyx API key or git token.
-- Commit small, as you go, with short conventional messages (docs:/feat:/chore:).
+
+## Git
+- Make small, logically contained commits; one per meaningful change, committed as you go.
+- Subject lines start with a single emoji that relates to the change, keep subjects under 72 characters. The rest of the message follows normal style (imperative, multi-paragraph).
+- The only trailer is a single `Assisted-By: <agent>:<model>` line (e.g. `Assisted-By: goose:qwen3.8-27b`); never `Co-Authored-By`, never a "Generated with" line. This applies to every AI assistant, including Claude Code.
