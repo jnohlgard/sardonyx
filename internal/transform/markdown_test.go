@@ -180,6 +180,56 @@ func TestHeadingTitle(t *testing.T) {
 	}
 }
 
+// TestFrontmatterTitle: files that start with a --- frontmatter fence
+// (T9 edge case: .mdx frontmatter). The fence lines and the key/value
+// body are not headings; the first level-1 heading after the fence is
+// the title; a frontmatter-only file falls back to the basename.
+func TestFrontmatterTitle(t *testing.T) {
+	const fenced = "---\ntitle: Hello\n---\n# Real Heading\nbody\n"
+	const fenceOnly = "---\ntitle: Hello\n---\n"
+	const quotedHash = "---\ntitle: \"# not a heading\"\n---\n# Real\n"
+	const bareFence = "---\n---\n# H\n"
+
+	withContent := func(content string) models.IngestedFile {
+		f := localFile()
+		f.RelPath = "mdx/component.mdx"
+		f.Content = content
+		return f
+	}
+	tests := []struct {
+		name string
+		f    models.IngestedFile
+		want string
+	}{
+		{"heading after the fence wins", withContent(fenced), "Real Heading"},
+		{"frontmatter-only falls back to basename", withContent(fenceOnly), "component.mdx"},
+		{"a hash inside a quoted value is not a heading", withContent(quotedHash), "Real"},
+		{"empty fence block", withContent(bareFence), "H"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := ToOnyxPayload(tc.f, models.DocumentSourceFile, 1, "base").Document.Title; got != tc.want {
+				t.Errorf("Title = %q, want %q", got, tc.want)
+			}
+		})
+	}
+}
+
+// TestFrontmatterVerbatim: sard does NOT strip frontmatter — the fence
+// and its body go to Onyx byte for byte (docs/PLAN.md §6: frontmatter is
+// kept as-is in v1). This test cements the implemented behavior.
+func TestFrontmatterVerbatim(t *testing.T) {
+	const fenced = "---\ntitle: Hello\n---\n# Real Heading\nbody\n"
+	f := localFile()
+	f.Content = fenced
+
+	got := ToOnyxPayload(f, models.DocumentSourceFile, 42, "base")
+	if got.Document.Sections[0].Text != fenced {
+		t.Errorf("section text = %q, want the frontmatter kept verbatim %q",
+			got.Document.Sections[0].Text, fenced)
+	}
+}
+
 // TestLargeSingleLineFile: a large (512 KiB) single-line file with no
 // heading maps cleanly — the title falls back to the basename, the
 // section carries the full content, and the ID is stable and

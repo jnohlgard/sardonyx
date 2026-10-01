@@ -654,7 +654,9 @@ func TestLocalFixture(t *testing.T) {
 		"notes.markdown",
 	}
 	// binary/nul.md (NUL byte), empty/zero.md, and empty/blank.md (empty)
-	// are skipped; the noise dirs contain no markdown.
+	// are skipped; the noise dirs contain no markdown. The set asserts
+	// .mdx is a discovered extension (guide.mdx; isMarkdown, T9 edge
+	// case: .mdx frontmatter).
 	root, _ := filepath.Abs(fixture)
 	files := wantPaths(t, res.Files, want...)
 	checkRecords(t, root, files)
