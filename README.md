@@ -1,6 +1,6 @@
 # sardonyx
 
-Ingest **markdown files** from a **git repository URL** or a **local directory** into
+Ingest **Markdown files** from a **git repository URL** or a **local directory** into
 [Onyx](https://onyx.app) via the [Ingestion API](https://docs.onyx.app/developers/guides/index_files_ingestion_api).
 
 > **Status:** ✅ Complete — all implementation tasks T1–T10 are done (task list in
@@ -19,11 +19,11 @@ interpreter or virtualenv needed on the target machine.
 
 ```bash
 sard ingest https://github.com/owner/repo            # all *.md / *.mdx / *.markdown in the repo
-sard ingest ./my-docs                                # all markdown files under a local directory
+sard ingest ./my-docs                                # all Markdown files under a local directory
 sard ingest https://github.com/owner/repo --include "docs/**" --dry-run
 ```
 
-- Discovers markdown files (`.md`, `.mdx`, `.markdown`) in a cloned repo (shallow clone,
+- Discovers Markdown files (`.md`, `.mdx`, `.markdown`) in a cloned repo (shallow clone,
   tracked files only) or a local directory tree.
 - Converts each file to an Onyx `IngestionDocument`:
   - stable, **deterministic document IDs** → re-running updates existing documents
@@ -52,7 +52,7 @@ You need an Onyx instance (cloud or self-hosted) and two things in it:
    they manage, but not into the default public pair.)
 2. **A Connector / CC-pair to receive the documents.**
    1. In the Onyx **Admin Panel**, open the **Connectors** list and create
-      a new connector — a **File Connector** works for plain markdown files.
+      a new connector — a **File Connector** works for plain Markdown files.
    2. Open the created connector and copy its `cc_pair_id` from the URL:
       `https://cloud.onyx.app/admin/connector/243` → `cc_pair_id = 243`.
    3. Documents ingested with that `cc_pair_id` appear on the Connectors
@@ -180,7 +180,7 @@ via `net/http/httptest`); git fixtures live under `internal/source/testdata/`.
 - **No deletion**: the Ingestion API cannot remove documents, so files deleted from the
   source keep their (stale) Onyx documents. Re-ingesting updates them, but deletion is a
   gap — see `docs/PLAN.md` §11.
-- One document = one markdown file, one section (no per-heading chunk splitting yet).
+- One document = one Markdown file, one section (no per-heading chunk splitting yet).
 - Sequential ingestion only (no parallel uploads in v1).
 
 ## Docs & references
