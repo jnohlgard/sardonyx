@@ -278,10 +278,35 @@ func TestNormalizeURLErrors(t *testing.T) {
 		"https://github.com/",
 		"git@host",
 		"git@:owner/repo",
+		// An invalid percent-escape in the host makes url.Parse itself
+		// fail — the branch at the parse step (T9 coverage gate).
+		"https://ex%zzample.com/owner/repo",
 	} {
 		if got, err := NormalizeURL(in); err == nil {
 			t.Errorf("NormalizeURL(%q) = %+v, want an error", in, got)
 		}
+	}
+}
+
+// TestStripGitSuffix: the .git-stripping helper on both shapes — a
+// multi-segment path (the common case, reached through normalization)
+// and a slash-less path (the last segment is the whole string;
+// NormalizeURL never reaches it, since every normalized origin has an
+// owner/repo path — T9 coverage gate).
+func TestStripGitSuffix(t *testing.T) {
+	cases := []struct{ in, want string }{
+		{"owner/repo.git", "owner/repo"},
+		{"owner/repo", "owner/repo"},
+		{"group/nested/repo.git", "group/nested/repo"},
+		{"repo.git", "repo"},
+		{"repo", "repo"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.in, func(t *testing.T) {
+			if got := stripGitSuffix(tc.in); got != tc.want {
+				t.Errorf("stripGitSuffix(%q) = %q, want %q", tc.in, got, tc.want)
+			}
+		})
 	}
 }
 
