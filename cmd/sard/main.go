@@ -1,4 +1,4 @@
-// Command sard ingests markdown files from a git repository URL or a
+// Command sard ingests Markdown files from a git repository URL or a
 // local directory into Onyx via the Ingestion API.
 //
 // This entry point stays deliberately thin: it hands every argument to
