@@ -15,7 +15,7 @@ type IngestedFile struct {
 	Kind         string    // "git" | "local"
 	RootLabel    string    // "owner/repo" or basename(abs(dir))
 	RelPath      string    // relative to the source root, forward slashes
-	Content      string    // markdown text
+	Content      string    // Markdown text
 	DocUpdatedAt time.Time // commit time (git) or mtime (local), UTC
 	CommitSHA    string    // git source only
 	BlobURL      string    // github.com source only
