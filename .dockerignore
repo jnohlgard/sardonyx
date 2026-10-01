@@ -1,0 +1,7 @@
+# Keep the build context to sources only. The prebuilt binary and .env
+# (which may hold ONYX_API_KEY) must never be copied into the image.
+sard
+.env
+.git
+.idea
+*.md
