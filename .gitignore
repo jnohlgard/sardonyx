@@ -1,22 +1,10 @@
-# Python
-__pycache__/
-*.py[cod]
-*.egg-info/
-.eggs/
-build/
-dist/
+# Build artifacts
+/sard
+*.test
+*.out
 
 # Environments / secrets
 .env
-.venv/
-venv/
-
-# Tooling caches
-.pytest_cache/
-.coverage
-htmlcov/
-.mypy_cache/
-.ruff_cache/
 
 # Editor / OS
 .idea/
