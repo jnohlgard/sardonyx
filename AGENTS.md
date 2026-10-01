@@ -4,9 +4,9 @@
 git repo URL or a local directory into Onyx via the Ingestion API.
 
 ## Status
-- T1–T4 are complete (config, models, transform, local directory source).
-  Next up is T5 (`internal/source/git.go`), then T6–T10 in `docs/PLAN.md`
-  order. The remaining stubs (`source/git.go`, `onyx/client.go`,
+- T1–T5 are complete (config, models, transform, local directory source,
+  git repository source). Next up is T6 (`internal/onyx/client.go`), then
+  T7–T10 in `docs/PLAN.md` order. The remaining stubs (`onyx/client.go`,
   `cli/cli.go`, `cmd/sard/main.go`) are comment-only — no logic yet.
 
 ## Naming

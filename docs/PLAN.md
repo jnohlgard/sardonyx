@@ -1,8 +1,9 @@
 # sardonyx — Implementation Plan
 
-**Status:** 🚧 T1–T4 complete (config, models, transform, local directory
-source); next up is T5 (git repository source). Implement tasks T5–T10 in §10
-in order; the remaining stub packages have a TODO naming their task.
+**Status:** 🚧 T1–T5 complete (config, models, transform, local directory
+source, git repository source); next up is T6 (Onyx client). Implement tasks
+T6–T10 in §10 in order; the remaining stub packages each have a TODO naming
+their task.
 
 **Language:** Go (switched from Python, 2026-10 — motivation: a single static
 binary that needs no interpreter or virtualenv on the target machine). The
@@ -170,9 +171,14 @@ are a configuration error (exit code 2), detected pre-flight.
 - **File discovery:** use `git ls-files '*.md' '*.mdx' '*.markdown'` against the clone.
   This lists **tracked** files only, so the repo's own `.gitignore` is respected for free —
   no manual noise-dir walking needed for this path.
+- **Filtering:** the same `--include`/`--exclude`/`--max-depth`/`--max-file-size` options as
+  the local source apply; `GitOptions` mirrors `LocalOptions` (with `--branch`/`--token` as the
+  git-specific additions) so the pipeline (T7) treats both sources uniformly.
 - **Provenance per file:** `git log -1 --format=%H%x00%ct -- <path>` → commit SHA (→
   `metadata.commit`) and commit unix timestamp (→ `doc_updated_at`). One `git log` call per
-  file is acceptable for v1 (batching is a future optimization).
+  file is acceptable for v1 (batching is a future optimization). With a `--depth 1` clone the
+  history holds only the HEAD commit, so every file is attributed to HEAD — a safe upper bound
+  for Onyx freshness; the per-file `git log` form becomes exact if the depth is ever raised.
 - **Section link:** for `https://github.com/…` (public) URLs, blob URL
   `https://github.com/owner/repo/blob/<branch>/<path>`; otherwise `null`.
 - **Default ID base:** the normalized origin URL with a lowercased host and
@@ -332,7 +338,7 @@ sardonyx/
     │   ├── git_test.go
     │   ├── local.go             # walk / git ls-files, filters, mtime
     │   ├── local_test.go
-    │   └── testdata/            # fixture repo + fixture tree
+    │   └── testdata/            # fixture tree (local source); git fixture repo built in a temp dir
     ├── transform/
     │   ├── markdown.go          # IngestedFile → OnyxPayload
     │   └── markdown_test.go
@@ -373,9 +379,11 @@ Run with `go test ./...`.
 - **T5 — Git repo source** (`internal/source/git.go`)
   - URL normalization, shallow clone via `os/exec` into an `os.MkdirTemp` dir (deferred
     cleanup), `git ls-files`, per-file `git log` metadata, token injection, blob URLs.
-  - Accept: ⬜ unit tests for URL normalization (pure fn); integration test that clones the
-    small local fixture repo under `testdata/` (local-path clone; skipped when `git` is not
-    on PATH) and yields expected files + metadata.
+  - Accept: ✅ unit tests for URL normalization (pure fn, table-driven); integration test
+    that clones a fixture repo built in a temp dir (a repo under `testdata/` would nest a repo
+    in a repo; local-path clone via `file://` so `--depth` is honored; skipped when `git` is
+    not on PATH) and yields expected files + metadata; token-injection test against a
+    401-challenging `httptest` server verifying the token reaches the wire and never the logs.
 - **T6 — Onyx client** (`internal/onyx/`)
   - POST + auth + timeout + retries + fail-fast + result mapping (per §7).
   - Accept: ⬜ tests against a `net/http/httptest` server: success (new/updated), 429 then
@@ -427,8 +435,8 @@ Run with `go test ./...`.
 - **HTTP integration:** an in-test `net/http/httptest` server (stdlib — no external mock
   library) recording requests; verify payload shape, retry behavior, and `already_existed`
   mapping.
-- **Git integration:** clone the small fixture repo under
-  `internal/source/testdata/` via a local path; verify `git ls-files`-based discovery and
+- **Git integration:** clone a fixture repo built in a temp dir via a local path (a repo
+  under `testdata/` would nest a repo in a repo); verify `git ls-files`-based discovery and
   commit metadata extraction (git binary required — document as a runtime dependency; tests
   `t.Skip` when git is not on PATH).
 - **End-to-end smoke:** `internal/cli` runs the full pipeline with `--dry-run` against the
