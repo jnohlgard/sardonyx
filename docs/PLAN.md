@@ -17,7 +17,7 @@ choices in this document changed.
 A small Go CLI tool that:
 
 1. Takes **one positional input**: a git repository URL **or** a local directory path.
-2. Discovers all **markdown files** (`*.md`, `*.mdx`, `*.markdown`).
+2. Discovers all **Markdown files** (`*.md`, `*.mdx`, `*.markdown`).
 3. Transforms each file into a valid Onyx **Ingestion API** payload.
 4. POSTs the payloads to the Onyx Ingestion API so the documents appear in the Onyx
    workspace (under a designated Connector / CC-pair).
@@ -27,7 +27,7 @@ A small Go CLI tool that:
 | ID   | Requirement                                                                                                                                                          |
 | ---- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | R1   | Accept a git repo URL (`https://`, `git@` ssh form, or `owner/repo` shorthand) or a local filesystem path as the single positional input.                                                            |
-| R2   | Discover markdown files: `.md`, `.mdx`, `.markdown`.                                                                                                                 |
+| R2   | Discover Markdown files: `.md`, `.mdx`, `.markdown`.                                                                                                                 |
 | R3   | Produce valid Onyx `IngestionDocument` payloads (see §6).                                                                                                            |
 | R4   | Send payloads to the Ingestion API with Bearer auth, timeouts, and retries (§7).                                                                                     |
 | R5   | **Idempotent re-runs**: deterministic, stable document IDs so re-ingesting the same repo/directory **updates** existing documents instead of duplicating.          |
@@ -42,7 +42,7 @@ A small Go CLI tool that:
 - **Deleting/pruning** documents from Onyx — the Ingestion API has no delete endpoint, so
   deleted source files leave stale documents behind. Mitigation is metadata/naming; a future
   version may call a separate Onyx deletion API if one exists.
-- Non-markdown file types (PDF, DOCX, …).
+- Non-Markdown file types (PDF, DOCX, …).
 - Scheduling / continuous sync (a cron job or CI step can invoke the CLI).
 - Image sections (`ImageSection` requires a separate file-store upload round-trip).
 - Creating the Onyx Connector / CC-pair programmatically (user creates it in the Admin Panel
@@ -77,7 +77,7 @@ Source: <https://docs.onyx.app/developers/guides/index_files_ingestion_api>
 ```
                     ┌──────────────────┐    ┌───────────────────┐    ┌────────────────┐
  input (url | path)→│ 1. Source layer  │ →  │ 2. Transform layer│ →  │ 3. Onyx client │ → Onyx Ingestion API
-                    │  git repo /      │    │  markdown →       │    │  HTTP + retry  │
+                    │  git repo /      │    │  Markdown →       │    │  HTTP + retry  │
                     │  local directory │    │  IngestionDoc     │    │  + summary     │
                     └────────┬─────────┘    └────────┬──────────┘    └────────────────┘
                              │
@@ -326,7 +326,7 @@ type IngestedFile struct {
 	Kind         string    // "git" | "local"
 	RootLabel    string    // "owner/repo" or basename(abs(dir))
 	RelPath      string    // relative to the source root, forward slashes
-	Content      string    // markdown text
+	Content      string    // Markdown text
 	DocUpdatedAt time.Time // commit time (git) or mtime (local), UTC
 	CommitSHA    string    // git source only
 	BlobURL      string    // github.com source only
@@ -335,7 +335,7 @@ type IngestedFile struct {
 
 ---
 
-## 6. Transform: markdown → Onyx document
+## 6. Transform: Markdown → Onyx document
 
 Pure function `ToOnyxPayload(f models.IngestedFile, source string, ccPairID int, idBase string)
 models.OnyxPayload`. The payload is a typed struct with JSON tags matching the Onyx schema
@@ -375,7 +375,7 @@ the `--id-base` / `SARD_ID_BASE` override when set, else the source's default
   - The kind prefix (`git` / `local`) keeps the two ID spaces disjoint.
 - **Intentionally omitted:** `chunk_count` (let Onyx compute), `primary_owners` /
   `secondary_owners`, `additional_info`, image sections.
-- **Content:** raw markdown text in a single section. v2 candidate: split into sections per
+- **Content:** raw Markdown text in a single section. v2 candidate: split into sections per
   top-level heading (better citations/links) — noted as a future task, not planned now.
 - Frontmatter (YAML at top of `.mdx`/Jekyll files) is kept as-is in v1; stripping is a
   future option.
