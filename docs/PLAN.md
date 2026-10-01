@@ -1,9 +1,9 @@
 # sardonyx — Implementation Plan
 
-**Status:** 🚧 T1–T5 complete (config, models, transform, local directory
-source, git repository source); next up is T6 (Onyx client). Implement tasks
-T6–T10 in §10 in order; the remaining stub packages each have a TODO naming
-their task.
+**Status:** 🚧 T1–T6 complete (config, models, transform, local directory
+source, git repository source, Onyx client); next up is T7 (CLI wiring).
+Implement tasks T7–T10 in §10 in order; the remaining stub packages each
+have a TODO naming their task.
 
 **Language:** Go (switched from Python, 2026-10 — motivation: a single static
 binary that needs no interpreter or virtualenv on the target machine). The
@@ -291,6 +291,28 @@ the `--id-base` / `SARD_ID_BASE` override when set, else the source's default
     non-200 after retries → `failed` with status code + body excerpt.
 - Never logs the API key.
 
+Implementation decisions (T6, recorded after the fact):
+
+- **`cc_pair_id` reconciliation:** `Ingest` sends the payload's own
+  `CCPairID` — the transform stamps it from the same `Settings.CCPairID`,
+  so the payload is the single source of truth on the wire; the
+  constructor's `ccPairID` parameter is kept only for signature
+  compatibility with this section.
+- **Backoff injectability:** the wait schedule lives in an unexported
+  client field (default 1 s / 4 s / 16 s per the spec); tests replace it
+  with millisecond values, so the retry tests stay fast while production
+  keeps the plan's schedule. With the 3-attempt cap only the first two
+  waits fire; the 16 s entry is kept so a raised cap has its slot.
+- **`api_url` handling:** the config layer guarantees the base URL
+  (default `https://cloud.onyx.app/api`); the client tolerates a trailing
+  `/` by stripping it before joining the `/onyx-api/ingestion` path.
+- **Error contract:** `401`/`403` return a non-nil error wrapping the
+  exported `ErrAuth` sentinel (fail-fast: the caller stops the run, since
+  every later document would fail the same way). Other failures (retries
+  exhausted, non-retryable 4xx) return a `failed` result with a nil error,
+  so one bad document never aborts a run; context cancellation returns a
+  `failed` result with the context's error (exit 130, §8).
+
 ---
 
 ## 8. Error handling & exit codes
@@ -386,8 +408,15 @@ Run with `go test ./...`.
     401-challenging `httptest` server verifying the token reaches the wire and never the logs.
 - **T6 — Onyx client** (`internal/onyx/`)
   - POST + auth + timeout + retries + fail-fast + result mapping (per §7).
-  - Accept: ⬜ tests against a `net/http/httptest` server: success (new/updated), 429 then
-    200, 500 x3 → failed, 401 fail-fast, key never in logs.
+  - Accept: ✅ tests against a `net/http/httptest` server (stdlib only):
+    success (new/updated from `already_existed`), 429 then 200, 500 ×3 →
+    failed with status code + body excerpt, 401/403 fail-fast (exactly one
+    request, actionable message, `ErrAuth`-wrapping error), other 4xx not
+    retried, connection-error retry, context cancellation before and in
+    flight, trailing-`/` tolerance, and a leak check — the API key appears
+    in no log line, error, reason, or request body. Retry waits run at
+    millisecond scale via the injectable backoff field (production keeps
+    1 s / 4 s / 16 s); the whole onyx suite runs in ~1 s.
 - **T7 — CLI wiring** (`internal/cli/`, `cmd/sard/`)
   - stdlib `flag` per §4 (append-value helper for repeatable `--include`/`--exclude`),
     `log/slog` logging; pipeline: resolve source → discover → transform → ingest → summary.
