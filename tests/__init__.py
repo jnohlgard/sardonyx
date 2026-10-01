@@ -1,1 +1,1 @@
-"""Test package for onyx-git-ingest. See tests/README.md."""
+"""Test package for sardonyx. See tests/README.md."""

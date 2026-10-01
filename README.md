@@ -1,4 +1,4 @@
-# onyx-git-ingest
+# sardonyx
 
 Ingest **markdown files** from a **git repository URL** or a **local directory** into
 [Onyx](https://onyx.app) via the [Ingestion API](https://docs.onyx.app/developers/guides/index_files_ingestion_api).
@@ -7,12 +7,19 @@ Ingest **markdown files** from a **git repository URL** or a **local directory**
 > Code implementation starts with task T1; this repo currently contains the plan,
 > documentation, and the package skeleton only.
 
+## Why the name
+
+**Sardonyx** is a red-and-black banded variety of onyx (both are forms of
+chalcedony) — the repo and Python package carry the full name, while the
+command line tool is simply **`sard`**, the stone's own name: short, easy to
+type, and unambiguous as a CLI.
+
 ## What it will do
 
 ```bash
-onyx-git-ingest ingest https://github.com/owner/repo            # all *.md / *.mdx / *.markdown in the repo
-onyx-git-ingest ingest ./my-docs                                # all markdown files under a local directory
-onyx-git-ingest ingest https://github.com/owner/repo --include "docs/**" --dry-run
+sard ingest https://github.com/owner/repo            # all *.md / *.mdx / *.markdown in the repo
+sard ingest ./my-docs                                # all markdown files under a local directory
+sard ingest https://github.com/owner/repo --include "docs/**" --dry-run
 ```
 
 - Discovers markdown files (`.md`, `.mdx`, `.markdown`) in a cloned repo (shallow clone,
@@ -54,7 +61,7 @@ See [`.env.example`](.env.example).
 docs/
   PLAN.md                # full implementation plan + task breakdown (T1–T10)
   onyx-ingestion-api.md  # condensed reference for the Onyx Ingestion API
-src/onyx_git_ingest/
+src/sardonyx/
   cli.py                 # argparse + pipeline orchestration        (T7)
   config.py              # flags > env > .env resolution            (T1)
   models.py              # IngestedFile / IngestResult records      (T2)

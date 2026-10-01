@@ -3,7 +3,7 @@ requires = ["setuptools>=68", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "onyx-git-ingest"
+name = "sardonyx"
 version = "0.1.0"
 description = "Ingest markdown files from a git repo URL or local directory into Onyx via the Ingestion API"
 readme = "README.md"
@@ -36,7 +36,7 @@ dev = [
 ]
 
 [project.scripts]
-onyx-git-ingest = "onyx_git_ingest.cli:main"
+sard = "sardonyx.cli:main"
 
 [project.urls]
 Documentation = "https://docs.onyx.app/developers/guides/index_files_ingestion_api"

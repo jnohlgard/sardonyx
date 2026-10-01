@@ -46,7 +46,7 @@ API is the lightweight route.
       { "text": "What is Onyx?\nOnyx is...", "link": "https://docs.onyx.app/faq#what-is-onyx" },
       { "text": "How do I get started?..." }                  // link is optional
       // image sections exist too, but require a prior POST /user/file/upload
-      // to get an image_file_id — not used by onyx-git-ingest
+      // to get an image_file_id — not used by sardonyx
     ],
     "metadata": { "category": "faq", "tags": ["frequently-asked", "help"] },
 
@@ -122,7 +122,7 @@ print(r.status_code, r.text)
 
 ---
 
-## Implications for `onyx-git-ingest`
+## Implications for `sardonyx`
 
 | Concern | How we handle it |
 | ------- | ---------------- |

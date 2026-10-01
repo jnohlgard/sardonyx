@@ -2,7 +2,7 @@
 
 Implements docs/PLAN.md §4 (CLI spec) and §10 task T7:
 
-    onyx-git-ingest ingest <url-or-path> [--cc-pair-id …] [--dry-run] …
+    sard ingest <url-or-path> [--cc-pair-id …] [--dry-run] …
 
 Pipeline: resolve config → pick source (git repo | local dir) → discover markdown
 files → transform each to an Onyx payload → send via OnyxClient → print summary

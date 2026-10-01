@@ -1,4 +1,4 @@
-# Tests for onyx-git-ingest
+# Tests for sardonyx
 
 Layout mirrors `docs/PLAN.md` §12 (testing strategy):
 

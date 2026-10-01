@@ -1,4 +1,4 @@
-# onyx-git-ingest — Implementation Plan
+# sardonyx — Implementation Plan
 
 **Status:** 🚧 Planning — no implementation yet. This document is the blueprint for the
 implementation tasks in §10.
@@ -94,7 +94,7 @@ a documented future extension.
 ## 4. CLI specification
 
 ```
-onyx-git-ingest ingest <source> [options]
+sard ingest <source> [options]
 
 <source>
   Git repo URL  e.g. https://github.com/owner/repo  |  git@github.com:owner/repo.git  |  owner/repo
@@ -119,9 +119,9 @@ Options
 Examples (to be documented in README once implemented):
 
 ```bash
-onyx-git-ingest ingest https://github.com/onyx-dot-app/onyx --cc-pair-id 42
-onyx-git-ingest ingest ./my-docs --api-url http://onyx.local:8080/api --api-key $ONYX_API_KEY
-onyx-git-ingest ingest https://github.com/org/repo --include "docs/**" --dry-run
+sard ingest https://github.com/onyx-dot-app/onyx --cc-pair-id 42
+sard ingest ./my-docs --api-url http://onyx.local:8080/api --api-key $ONYX_API_KEY
+sard ingest https://github.com/org/repo --include "docs/**" --dry-run
 ```
 
 ---
@@ -196,7 +196,7 @@ Pure function `to_onyx_payload(file: IngestedFile, source: str, cc_pair_id: int)
 | `title`              | first `# …` heading in the file, else the filename       | same                                           |
 | `sections`           | `[{"text": content, "link": blob_url or None}]`          | `[{"text": content}]`                          |
 | `source`             | `github` / `gitlab` / `file` (per §5.2; `--source` override) | `file` (or override)                   |
-| `metadata`           | `{repo: <origin>, path: <relpath>, commit: <sha>, ingested_by: "onyx-git-ingest"}` | `{path: <relpath>, ingested_by: "onyx-git-ingest"}` |
+| `metadata`           | `{repo: <origin>, path: <relpath>, commit: <sha>, ingested_by: "sardonyx"}` | `{path: <relpath>, ingested_by: "sardonyx"}` |
 | `doc_updated_at`     | last-commit timestamp, ISO-8601 UTC                      | mtime, ISO-8601 UTC                            |
 | `from_ingestion_api` | `true`                                                   | `true`                                         |
 
@@ -246,7 +246,7 @@ Pure function `to_onyx_payload(file: IngestedFile, source: str, cc_pair_id: int)
 ## 9. Repository layout
 
 ```
-onyx-git-ingest/
+sardonyx/
 ├── README.md                      # project overview, setup, usage (filled in as tasks land)
 ├── pyproject.toml                 # packaging + deps + console-script entry point
 ├── .env.example                   # ONYX_API_KEY / ONYX_API_URL / ONYX_CC_PAIR_ID / GIT_TOKEN
@@ -255,9 +255,9 @@ onyx-git-ingest/
 │   ├── PLAN.md                    # this file
 │   └── onyx-ingestion-api.md      # condensed reference for the Ingestion API
 ├── src/
-│   └── onyx_git_ingest/
+│   └── sardonyx/
 │       ├── __init__.py            # package docstring, __version__
-│       ├── __main__.py            # `python -m onyx_git_ingest`
+│       ├── __main__.py            # `python -m sardonyx`
 │       ├── cli.py                 # argparse, pipeline orchestration, summary
 │       ├── config.py              # flags > env > .env resolution
 │       ├── models.py              # IngestedFile, IngestResult, payload types
@@ -319,7 +319,7 @@ Each task should land in its own commit with passing tests where applicable.
   - Edge cases: CRLF, non-UTF-8, very long single file, monorepo depth, `.mdx` frontmatter.
   - Accept: ✅ full `pytest` green; coverage of the pure functions ≥ 90 %.
 - **T10 — Packaging & README**
-  - Verify `pip install -e .` → `onyx-git-ingest` console script works; README quickstart
+  - Verify `pip install -e .` → `sardonyx` console script works; README quickstart
     with real examples, prerequisites (API key, CC-pair creation walkthrough), and the
     stale-document limitation.
   - Accept: ✅ fresh venv install + dry-run works from the README instructions.

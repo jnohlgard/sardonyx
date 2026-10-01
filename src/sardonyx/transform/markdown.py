@@ -10,8 +10,8 @@ Implements docs/PLAN.md §6 and §10 task T3. Pure function, no I/O.
 - title: first `# ` heading, else the file name.
 - sections: [{"text": content, "link": blob_url or None}].
 - source: github / gitlab / file (or explicit override).
-- metadata: {repo, path, commit, ingested_by: "onyx-git-ingest"} (git);
-            {path, ingested_by: "onyx-git-ingest"} (local).
+- metadata: {repo, path, commit, ingested_by: "sardonyx"} (git);
+            {path, ingested_by: "sardonyx"} (local).
 - doc_updated_at: ISO-8601 UTC (commit time or mtime).
 - from_ingestion_api: true.  chunk_count / owners / images: intentionally omitted.
 
