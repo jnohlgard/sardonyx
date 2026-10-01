@@ -233,7 +233,7 @@ the `--id-base` / `SARD_ID_BASE` override when set, else the source's default
 | `title`              | first `# …` heading in the file, else the filename       | same                                           |
 | `sections`           | `[{"text": content, "link": blob_url or None}]`          | `[{"text": content}]`                          |
 | `source`             | `github` / `gitlab` / `file` (per §5.2; `--source` override) | `file` (or override)                   |
-| `metadata`           | `{repo: <normalized origin>, path: <relpath>, commit: <sha>, ingested_by: "sardonyx"}` | `{path: <relpath>, ingested_by: "sardonyx"}` |
+| `metadata`           | `{repo: <owner/repo>, path: <relpath>, commit: <sha>, ingested_by: "sardonyx"}` | `{path: <relpath>, ingested_by: "sardonyx"}` |
 | `doc_updated_at`     | last-commit timestamp, RFC-3339 UTC                      | mtime, RFC-3339 UTC                            |
 | `from_ingestion_api` | `true`                                                   | `true`                                         |
 
