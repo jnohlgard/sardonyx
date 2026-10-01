@@ -1,19 +1,21 @@
-// Command sard ingests markdown files from a git repository URL or a local
-// directory into Onyx via the Ingestion API.
+// Command sard ingests markdown files from a git repository URL or a
+// local directory into Onyx via the Ingestion API.
 //
-// TODO (T7): parse flags per docs/PLAN.md §4 and run the pipeline via
-// internal/cli; map the result to the exit codes in §8.
+// This entry point stays deliberately thin: it hands every argument to
+// cli.Run, which owns flag parsing, logging (log/slog to stderr), the
+// pipeline, and the exit codes (docs/PLAN.md §8), and exits with the
+// returned code. main prints nothing on its own.
 package main
 
 import (
-	"fmt"
 	"os"
+
+	"sardonyx/internal/cli"
 )
 
 // version is set at build time: go build -ldflags "-X main.version=…"
 var version = "dev"
 
 func main() {
-	fmt.Fprintf(os.Stderr, "sard %s: not implemented yet — see docs/PLAN.md §10 (T7)\n", version)
-	os.Exit(2)
+	os.Exit(cli.Run(os.Args[1:]))
 }
