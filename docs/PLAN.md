@@ -1,7 +1,8 @@
 # sardonyx — Implementation Plan
 
-**Status:** 🚧 Plan-first — implement tasks T1–T10 in §10 in order; each stub
-package has a TODO naming its task.
+**Status:** 🚧 T1–T4 complete (config, models, transform, local directory
+source); next up is T5 (git repository source). Implement tasks T5–T10 in §10
+in order; the remaining stub packages have a TODO naming their task.
 
 **Language:** Go (switched from Python, 2026-10 — motivation: a single static
 binary that needs no interpreter or virtualenv on the target machine). The
@@ -182,9 +183,12 @@ are a configuration error (exit code 2), detected pre-flight.
 ### 5.3 Local directory source
 
 - Validate the path exists and is a directory (else config error, exit code 2).
-- If the directory (or an ancestor) is a git repo, prefer `git ls-files` for the same
-  reasons as §5.2 (and get commit metadata for free). Otherwise walk with
-  `filepath.WalkDir`.
+- If the directory (or an ancestor) is a git repo, discovery prefers `git ls-files` (tracked
+  files only; the repo's own `.gitignore` is respected for free) and falls back to a warned
+  `filepath.WalkDir` when git is unavailable or fails. The input type decides the kind:
+  a directory input always yields `local` records — `doc_updated_at` is the file's mtime and
+  `CommitSHA`/`BlobURL` stay empty, so a repo's commit metadata is never ingested on this
+  path (a git repo URL input is what gets commit provenance, §5.2).
 - **Default exclusions** (walk mode only): `.git`, `node_modules`, `dist`, `build`,
   `vendor`, `.venv`, `__pycache__`, `.idea`, `.github` (keep README-adjacent dirs? —
   decision: include `.github` workflows dir? No: exclude; `--include` can override).
@@ -369,31 +373,31 @@ Run with `go test ./...`.
 - **T5 — Git repo source** (`internal/source/git.go`)
   - URL normalization, shallow clone via `os/exec` into an `os.MkdirTemp` dir (deferred
     cleanup), `git ls-files`, per-file `git log` metadata, token injection, blob URLs.
-  - Accept: ✅ unit tests for URL normalization (pure fn); integration test that clones the
+  - Accept: ⬜ unit tests for URL normalization (pure fn); integration test that clones the
     small local fixture repo under `testdata/` (local-path clone; skipped when `git` is not
     on PATH) and yields expected files + metadata.
 - **T6 — Onyx client** (`internal/onyx/`)
   - POST + auth + timeout + retries + fail-fast + result mapping (per §7).
-  - Accept: ✅ tests against a `net/http/httptest` server: success (new/updated), 429 then
+  - Accept: ⬜ tests against a `net/http/httptest` server: success (new/updated), 429 then
     200, 500 x3 → failed, 401 fail-fast, key never in logs.
 - **T7 — CLI wiring** (`internal/cli/`, `cmd/sard/`)
   - stdlib `flag` per §4 (append-value helper for repeatable `--include`/`--exclude`),
     `log/slog` logging; pipeline: resolve source → discover → transform → ingest → summary.
-  - Accept: ✅ `--dry-run` prints valid JSON payloads; exit codes per §8; end-to-end smoke
+  - Accept: ⬜ `--dry-run` prints valid JSON payloads; exit codes per §8; end-to-end smoke
     test against the mock server.
 - **T8 — Summary & polish**
   - Clean summary output (counts, elapsed, failure list); `--limit`; progress line per file.
-  - Accept: ✅ manual run against a real Onyx instance (or recorded mock) matches expectations.
+  - Accept: ⬜ manual run against a real Onyx instance (or recorded mock) matches expectations.
 - **T9 — Test hardening**
   - Edge cases: CRLF, non-UTF-8, very long single file, monorepo depth, `.mdx` frontmatter.
-  - Accept: ✅ full `go test ./...` green; `go test -cover` ≥ 90 % on the pure-function
+  - Accept: ⬜ full `go test ./...` green; `go test -cover` ≥ 90 % on the pure-function
     packages (`config`, `transform`, URL normalization).
 - **T10 — Build & README**
   - Build a single static binary: `CGO_ENABLED=0 go build -ldflags "-X main.version=…"
     -o sard ./cmd/sard`; README quickstart (prebuilt binary or `go install
     sardonyx/cmd/sard`), prerequisites (API key, CC-pair creation walkthrough), and the
     stale-document limitation.
-  - Accept: ✅ fresh checkout → `go build ./...` → `./sard ingest … --dry-run` works from
+  - Accept: ⬜ fresh checkout → `go build ./...` → `./sard ingest … --dry-run` works from
     the README instructions.
 
 ---

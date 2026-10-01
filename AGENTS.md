@@ -4,8 +4,10 @@
 git repo URL or a local directory into Onyx via the Ingestion API.
 
 ## Status
-- Plan-first: implement tasks T1–T10 from `docs/PLAN.md` in order; each stub
-  package has a TODO naming its task. Stubs are comment-only — no logic yet.
+- T1–T4 are complete (config, models, transform, local directory source).
+  Next up is T5 (`internal/source/git.go`), then T6–T10 in `docs/PLAN.md`
+  order. The remaining stubs (`source/git.go`, `onyx/client.go`,
+  `cli/cli.go`, `cmd/sard/main.go`) are comment-only — no logic yet.
 
 ## Naming
 - Repo/Go module is `sardonyx`; the binary and command are `sard`.
