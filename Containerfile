@@ -23,7 +23,7 @@
 #     with buildx --provenance/--sbom, not in this file.
 
 # ── Build stage ─────────────────────────────────────────────────────────────
-ARG GO_VERSION=1.24
+ARG GO_VERSION=1.27
 FROM golang:${GO_VERSION} AS build
 
 ARG VERSION=dev
