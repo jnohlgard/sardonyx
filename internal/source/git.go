@@ -322,14 +322,20 @@ type GitOptions struct {
 // GitResult is Git's output, mirroring LocalResult: the discovered
 // files, sorted by RelPath; the run's default ID base — the normalized
 // origin URL, lowercased host, no trailing .git, never credentials
-// (docs/PLAN.md §5.2, §6); and the branch the clone actually resolved
-// to (used in GitHub blob URLs; a short SHA when HEAD is detached, e.g.
-// a cloned tag). The pipeline uses IDBase as the document-ID base when
-// no --id-base / SARD_ID_BASE override is set.
+// (docs/PLAN.md §5.2, §6); the branch the clone actually resolved to
+// (used in GitHub blob URLs; a short SHA when HEAD is detached, e.g.
+// a cloned tag); and Skipped, the number of files dropped by a
+// per-file check (oversize, binary, empty, unreadable, no commit
+// metadata; each a warning) and reported in the run summary
+// (docs/PLAN.md §8). Files outside the scope of the depth, include, or
+// exclude filters are not skipped — that is deliberate scoping. The
+// pipeline uses IDBase as the document-ID base when no --id-base /
+// SARD_ID_BASE override is set.
 type GitResult struct {
-	IDBase string
-	Branch string
-	Files  []models.IngestedFile
+	IDBase  string
+	Branch  string
+	Files   []models.IngestedFile
+	Skipped int
 }
 
 // Git clones the repository at src (docs/PLAN.md §5.2, §5.4) and
@@ -351,8 +357,8 @@ type GitResult struct {
 // every file is attributed to that commit — CommitSHA and
 // DocUpdatedAt (UTC) — a safe upper bound on the file's true
 // last-modified time (see the file comment). Files that are oversize,
-// binary (NUL bytes), or empty are skipped with a warning, as in
-// Local; UTF-8 repair applies the same way.
+// binary (NUL bytes), or empty are skipped with a warning and counted
+// in GitResult.Skipped, as in Local; UTF-8 repair applies the same way.
 //
 // Record shape: Kind=git, RootLabel=the origin's "owner/repo" (or the
 // path's basename for a local clone), RelPath slash-separated,
@@ -435,10 +441,12 @@ func Git(src string, opts GitOptions, log *slog.Logger) (*GitResult, error) {
 		return nil, fmt.Errorf("discovering files in the clone: %s", redact(err.Error(), secrets...))
 	}
 
+	files, skipped := collectGitFiles(tmp, norm, branch, candidates, opts, log, secrets)
 	return &GitResult{
-		IDBase: norm.IDBase,
-		Branch: branch,
-		Files:  collectGitFiles(tmp, norm, branch, candidates, opts, log, secrets),
+		IDBase:  norm.IDBase,
+		Branch:  branch,
+		Files:   files,
+		Skipped: skipped,
 	}, nil
 }
 
@@ -495,9 +503,12 @@ func lastCommit(dir, rel string) (string, time.Time, error) {
 // IngestedFile records, mirroring collectFiles: files out of scope for
 // MaxDepth, Include, or Exclude are dropped silently (deliberate
 // scoping) while oversize, binary, and empty skips are warnings. The
-// result is sorted by RelPath.
-func collectGitFiles(root string, norm NormalizedURL, branch string, candidates []string, opts GitOptions, log *slog.Logger, secrets []string) []models.IngestedFile {
+// returned count is the number of files dropped by a per-file check
+// (the "skipped" of the run summary, docs/PLAN.md §8). The files are
+// sorted by RelPath.
+func collectGitFiles(root string, norm NormalizedURL, branch string, candidates []string, opts GitOptions, log *slog.Logger, secrets []string) ([]models.IngestedFile, int) {
 	var files []models.IngestedFile
+	var skipped int
 	maxBytes := int64(opts.MaxFileSizeKiB) * 1024
 	for _, rel := range candidates {
 		if opts.MaxDepth > 0 && pathDepth(rel) > opts.MaxDepth {
@@ -513,32 +524,38 @@ func collectGitFiles(root string, norm NormalizedURL, branch string, candidates 
 		path := filepath.Join(root, filepath.FromSlash(rel))
 		fi, err := os.Stat(path)
 		if err != nil {
+			skipped++
 			log.Warn("skipping unreadable file", "path", rel, "error", err)
 			continue
 		}
 		if maxBytes > 0 && fi.Size() > maxBytes {
+			skipped++
 			log.Warn("skipping file larger than max file size", "path", rel,
 				"sizeKiB", fi.Size()/1024, "maxKiB", opts.MaxFileSizeKiB)
 			continue
 		}
 		raw, err := os.ReadFile(path)
 		if err != nil {
+			skipped++
 			log.Warn("skipping unreadable file", "path", rel, "error", err)
 			continue
 		}
 		if bytes.IndexByte(raw, 0) >= 0 {
+			skipped++
 			log.Warn("skipping binary file (contains NUL bytes)", "path", rel)
 			continue
 		}
 		content := repairUTF8(raw)
 		if strings.TrimSpace(content) == "" {
 			// "Empty" means zero-length or whitespace-only content.
+			skipped++
 			log.Warn("skipping empty file (zero-length or whitespace-only)", "path", rel)
 			continue
 		}
 
 		sha, committedAt, err := lastCommit(root, rel)
 		if err != nil {
+			skipped++
 			log.Warn("skipping file without commit metadata", "path", rel,
 				"error", redact(err.Error(), secrets...))
 			continue
@@ -555,5 +572,5 @@ func collectGitFiles(root string, norm NormalizedURL, branch string, candidates 
 		})
 	}
 	sort.Slice(files, func(i, j int) bool { return files[i].RelPath < files[j].RelPath })
-	return files
+	return files, skipped
 }

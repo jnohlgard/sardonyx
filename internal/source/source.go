@@ -8,10 +8,11 @@
 //
 // dir is the source directory; opts carries the include/exclude doublestar
 // globs, max depth, and max file size; log receives warnings for skipped
-// files. LocalResult holds the discovered files (sorted by RelPath) and
-// the source's default ID base (the source root's cleaned absolute path as
-// given, no symlink resolution), which the pipeline uses when no
-// --id-base / SARD_ID_BASE override is set.
+// files. LocalResult holds the discovered files (sorted by RelPath), the
+// number of files dropped by a per-file check (Skipped, for the run
+// summary), and the source's default ID base (the source root's cleaned
+// absolute path as given, no symlink resolution), which the pipeline uses
+// when no --id-base / SARD_ID_BASE override is set.
 //
 // The git source (task T5) is exported as:
 //
@@ -25,7 +26,8 @@
 // git.go for the shallow-clone attribution semantics — and GitHub blob
 // URLs for github.com origins), the run's default ID base — the
 // normalized origin URL, lowercased host, no trailing .git, never
-// credentials — and the branch the clone resolved to.
+// credentials —, the branch the clone resolved to, and the number of
+// files dropped by a per-file check (Skipped, for the run summary).
 //
 // GitOptions mirrors LocalOptions: the same include/exclude globs
 // (matched case-sensitively against the slash-separated path relative

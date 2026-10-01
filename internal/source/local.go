@@ -71,13 +71,18 @@ type LocalOptions struct {
 }
 
 // LocalResult is Local's output: the discovered files, sorted by RelPath,
-// and the source's default ID base — the source root's cleaned absolute
-// path as given, with no symlink resolution. The pipeline uses IDBase as
-// the document ID base when no --id-base / SARD_ID_BASE override is set
-// (docs/PLAN.md §5.3, §6).
+// the source's default ID base — the source root's cleaned absolute
+// path as given, with no symlink resolution — and Skipped, the number of
+// files dropped by a per-file check (oversize, binary, empty, unreadable;
+// each such drop is a warning) and reported in the run summary
+// (docs/PLAN.md §8). Files outside the scope of the depth, include, or
+// exclude filters are not skipped — that is deliberate scoping. The
+// pipeline uses IDBase as the document ID base when no --id-base /
+// SARD_ID_BASE override is set (docs/PLAN.md §5.3, §6).
 type LocalResult struct {
-	IDBase string
-	Files  []models.IngestedFile
+	IDBase  string
+	Files   []models.IngestedFile
+	Skipped int
 }
 
 // Local discovers the markdown files (.md, .mdx, .markdown) under dir and
@@ -92,7 +97,8 @@ type LocalResult struct {
 // Content=UTF-8 text with invalid byte sequences replaced by U+FFFD,
 // DocUpdatedAt=file mtime (UTC), CommitSHA and BlobURL empty. Files that
 // are oversize, binary (NUL bytes), or empty (zero-length or
-// whitespace-only) are skipped with a warning on log.
+// whitespace-only) are skipped with a warning on log and counted in
+// LocalResult.Skipped.
 //
 // See the package comment for the git-repository discovery behavior. A nil
 // log uses slog.Default().
@@ -137,9 +143,11 @@ func Local(dir string, opts LocalOptions, log *slog.Logger) (*LocalResult, error
 		candidates = walkMarkdown(abs, opts, log)
 	}
 
+	files, skipped := collectFiles(abs, filepath.Base(abs), candidates, opts, log)
 	return &LocalResult{
-		IDBase: abs,
-		Files:  collectFiles(abs, filepath.Base(abs), candidates, opts, log),
+		IDBase:  abs,
+		Files:   files,
+		Skipped: skipped,
 	}, nil
 }
 
@@ -250,9 +258,12 @@ func walkMarkdown(root string, opts LocalOptions, log *slog.Logger) []string {
 // collectFiles turns candidate relative paths into IngestedFile records.
 // Files out of scope for MaxDepth, Include, or Exclude are dropped
 // silently — they are deliberate scoping — while oversize, binary, and
-// empty skips are warnings. The result is sorted by RelPath.
-func collectFiles(root, rootLabel string, candidates []string, opts LocalOptions, log *slog.Logger) []models.IngestedFile {
+// empty skips are warnings. The returned count is the number of files
+// dropped by a per-file check (the "skipped" of the run summary,
+// docs/PLAN.md §8). The files are sorted by RelPath.
+func collectFiles(root, rootLabel string, candidates []string, opts LocalOptions, log *slog.Logger) ([]models.IngestedFile, int) {
 	var files []models.IngestedFile
+	var skipped int
 	maxBytes := int64(opts.MaxFileSizeKiB) * 1024
 	for _, rel := range candidates {
 		if opts.MaxDepth > 0 && pathDepth(rel) > opts.MaxDepth {
@@ -268,26 +279,31 @@ func collectFiles(root, rootLabel string, candidates []string, opts LocalOptions
 		path := filepath.Join(root, filepath.FromSlash(rel))
 		fi, err := os.Stat(path)
 		if err != nil {
+			skipped++
 			log.Warn("skipping unreadable file", "path", rel, "error", err)
 			continue
 		}
 		if maxBytes > 0 && fi.Size() > maxBytes {
+			skipped++
 			log.Warn("skipping file larger than max file size", "path", rel,
 				"sizeKiB", fi.Size()/1024, "maxKiB", opts.MaxFileSizeKiB)
 			continue
 		}
 		raw, err := os.ReadFile(path)
 		if err != nil {
+			skipped++
 			log.Warn("skipping unreadable file", "path", rel, "error", err)
 			continue
 		}
 		if bytes.IndexByte(raw, 0) >= 0 {
+			skipped++
 			log.Warn("skipping binary file (contains NUL bytes)", "path", rel)
 			continue
 		}
 		content := repairUTF8(raw)
 		if strings.TrimSpace(content) == "" {
 			// "Empty" means zero-length or whitespace-only content.
+			skipped++
 			log.Warn("skipping empty file (zero-length or whitespace-only)", "path", rel)
 			continue
 		}
@@ -300,7 +316,7 @@ func collectFiles(root, rootLabel string, candidates []string, opts LocalOptions
 		})
 	}
 	sort.Slice(files, func(i, j int) bool { return files[i].RelPath < files[j].RelPath })
-	return files
+	return files, skipped
 }
 
 // passesInclude reports whether rel passes the include filter: it passes
