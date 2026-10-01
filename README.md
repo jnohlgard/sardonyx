@@ -5,14 +5,15 @@ Ingest **markdown files** from a **git repository URL** or a **local directory**
 
 > **Status:** 🚧 In planning — the design lives in [`docs/PLAN.md`](docs/PLAN.md).
 > Code implementation starts with task T1; this repo currently contains the plan,
-> documentation, and the package skeleton only.
+> documentation, and the Go module skeleton only.
 
 ## Why the name
 
 **Sardonyx** is a red-and-black banded variety of onyx (both are forms of
-chalcedony) — the repo and Python package carry the full name, while the
+chalcedony) — the repo and Go module carry the full name, while the
 command line tool is simply **`sard`**, the stone's own name: short, easy to
-type, and unambiguous as a CLI.
+type, and unambiguous as a CLI. It builds to a single static binary: no
+interpreter or virtualenv needed on the target machine.
 
 ## What it will do
 
@@ -61,20 +62,20 @@ See [`.env.example`](.env.example).
 docs/
   PLAN.md                # full implementation plan + task breakdown (T1–T10)
   onyx-ingestion-api.md  # condensed reference for the Onyx Ingestion API
-src/sardonyx/
-  cli.py                 # argparse + pipeline orchestration        (T7)
-  config.py              # flags > env > .env resolution            (T1)
-  models.py              # IngestedFile / IngestResult records      (T2)
-  sources/
-    git_repo.py          # URL normalization, shallow clone, git ls-files (T5)
-    local_dir.py         # directory walk, filters, mtime           (T4)
-  transform/
-    markdown.py          # IngestedFile → Onyx payload              (T3)
-  client/
-    onyx.py              # HTTP client, retries, result mapping     (T6)
-tests/
-  …                      # unit + mock-server tests                 (T9)
+cmd/sard/
+  main.go                # thin entry point: run + exit code        (T7)
+internal/
+  cli/cli.go             # flags, pipeline orchestration, summary   (T7, T8)
+  config/config.go       # flags > env > .env resolution            (T1)
+  models/models.go       # IngestedFile / IngestResult / OnyxPayload (T2)
+  source/git.go          # URL normalization, shallow clone, git ls-files (T5)
+  source/local.go        # directory walk, filters, mtime           (T4)
+  transform/markdown.go  # IngestedFile → Onyx payload              (T3)
+  onyx/client.go         # HTTP client, retries, result mapping     (T6)
 ```
+
+Tests live next to the code in each package as `*_test.go` (mock Onyx server
+via `net/http/httptest`); git fixtures live under `internal/source/testdata/`.
 
 ## Known limitations (v1)
 
