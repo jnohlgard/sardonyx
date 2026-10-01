@@ -113,6 +113,10 @@ Options
   --cc-pair-id     Onyx connector-credential-pair id, int  (env ONYX_CC_PAIR_ID)
   --branch         Branch to clone; git URLs only (default: repo's default branch)
   --source         Override the document "source" enum: file | github | gitlab | web | ingestion_api
+  --id-base        Arbitrary ID base for every document of this run (env SARD_ID_BASE).
+                   Default: normalized origin URL (git) or cleaned absolute root path (local).
+                   Keeps IDs stable across forks / URL changes (git) or moved dirs, mount
+                   points, and symlinks (local); affects the document ID only (§6)
   --include GLOB   Include filter, repeatable (e.g. "docs/**", "*.mdx")
   --exclude GLOB   Exclude filter, repeatable (on top of the default noise-dir exclusions)
   --max-depth N    Max directory depth below the source root
@@ -144,7 +148,7 @@ sard ingest https://github.com/org/repo --include "docs/**" --dry-run
 ### 5.1 Configuration resolution
 
 Priority: **CLI flag > environment variable > `.env` file (current working directory) > default**.
-Env vars: `ONYX_API_URL`, `ONYX_API_KEY`, `ONYX_CC_PAIR_ID`, `GIT_TOKEN`.
+Env vars: `ONYX_API_URL`, `ONYX_API_KEY`, `ONYX_CC_PAIR_ID`, `GIT_TOKEN`, `SARD_ID_BASE` (optional, §6).
 `.env` loading via `github.com/joho/godotenv`; a missing `.env` is not an error.
 Resolved into a `config.Settings` struct (T1); required values missing after all sources
 are a configuration error (exit code 2), detected pre-flight.
@@ -170,6 +174,10 @@ are a configuration error (exit code 2), detected pre-flight.
   file is acceptable for v1 (batching is a future optimization).
 - **Section link:** for `https://github.com/…` (public) URLs, blob URL
   `https://github.com/owner/repo/blob/<branch>/<path>`; otherwise `null`.
+- **Default ID base:** the normalized origin URL with a lowercased host and
+  no trailing `.git` (e.g. `https://github.com/owner/repo`). Never includes
+  credentials, never logged. A `--id-base` / `SARD_ID_BASE` override
+  replaces it for the whole run, used verbatim (§6).
 
 ### 5.3 Local directory source
 
@@ -188,6 +196,9 @@ are a configuration error (exit code 2), detected pre-flight.
 - Content read as UTF-8: invalid byte sequences are replaced with U+FFFD (small helper over
   `unicode/utf8`). Files containing NUL bytes are treated as binary and skipped with a
   warning.
+- **Default ID base:** the source root's cleaned absolute path as given (no
+  symlink resolution). A `--id-base` / `SARD_ID_BASE` override replaces it
+  for the whole run, used verbatim (§6).
 
 ### 5.4 Common output record
 
@@ -208,24 +219,42 @@ type IngestedFile struct {
 
 ## 6. Transform: markdown → Onyx document
 
-Pure function `ToOnyxPayload(f models.IngestedFile, source string, ccPairID int) models.OnyxPayload`.
-The payload is a typed struct with JSON tags matching the Onyx schema (marshaled with
-`encoding/json`); the top-level request envelope is `{"document": {…}, "cc_pair_id": n}`.
+Pure function `ToOnyxPayload(f models.IngestedFile, source string, ccPairID int, idBase string)
+models.OnyxPayload`. The payload is a typed struct with JSON tags matching the Onyx schema
+(marshaled with `encoding/json`); the top-level request envelope is
+`{"document": {…}, "cc_pair_id": n}`. The pipeline (T7) computes the run's `idBase` once:
+the `--id-base` / `SARD_ID_BASE` override when set, else the source's default
+(§5.2 / §5.3).
 
 | Field                | Value (git)                                              | Value (local)                                  |
 | -------------------- | -------------------------------------------------------- | ---------------------------------------------- |
-| `id`                 | `sha256("git\0" + normalized_origin + "\0" + relpath)`   | `sha256("local\0" + normalized_abs_path)`      |
+| `id`                 | `sha256("git\0" + idBase + "\0" + relpath)`              | `sha256("local\0" + idBase + "\0" + relpath)`  |
 | `semantic_identifier`| `owner/repo/path/to/file.md`                             | `<dir-name>/path/to/file.md`                   |
 | `title`              | first `# …` heading in the file, else the filename       | same                                           |
 | `sections`           | `[{"text": content, "link": blob_url or None}]`          | `[{"text": content}]`                          |
 | `source`             | `github` / `gitlab` / `file` (per §5.2; `--source` override) | `file` (or override)                   |
-| `metadata`           | `{repo: <origin>, path: <relpath>, commit: <sha>, ingested_by: "sardonyx"}` | `{path: <relpath>, ingested_by: "sardonyx"}` |
+| `metadata`           | `{repo: <normalized origin>, path: <relpath>, commit: <sha>, ingested_by: "sardonyx"}` | `{path: <relpath>, ingested_by: "sardonyx"}` |
 | `doc_updated_at`     | last-commit timestamp, RFC-3339 UTC                      | mtime, RFC-3339 UTC                            |
 | `from_ingestion_api` | `true`                                                   | `true`                                         |
 
 - **ID design note:** branch is deliberately *not* part of the git ID — re-ingesting a
   different branch updates the same documents (last write wins). Two different branches
   ingested into the same CC-pair will overwrite each other; this is acceptable and documented.
+- **ID base & migrations.** The ID is derived from an *ID base* that is a property of the
+  run, not of the file: the git source's normalized origin URL (§5.2) or the local root's
+  cleaned absolute path (§5.3), with the file's `relpath` as the per-file part.
+  `--id-base` / `SARD_ID_BASE` replaces the base for the whole run, used verbatim — any
+  string, no normalization. The override affects the ID only: `semantic_identifier`,
+  `metadata`, and section links still reflect the actual origin/path. Uses:
+  - **Fork / URL change:** passing the *old* origin as the base keeps documents matching
+    the fork (Onyx sees updates, not duplicates).
+  - **Moved directory / mount point / symlink:** passing the *old* absolute path — or any
+    canonical string — keeps IDs stable. For long-term stability, pick one canonical base
+    per project (e.g. a project name) and always pass it, so moves, forks, and renames
+    never change an ID.
+  - Changing the effective base (or letting the default follow a changed origin/path)
+    mints a fresh ID set; the previous documents stay in Onyx as stale (§11 #1).
+  - The kind prefix (`git` / `local`) keeps the two ID spaces disjoint.
 - **Intentionally omitted:** `chunk_count` (let Onyx compute), `primary_owners` /
   `secondary_owners`, `additional_info`, image sections.
 - **Content:** raw markdown text in a single section. v2 candidate: split into sections per
@@ -326,9 +355,12 @@ Run with `go test ./...`.
   - `IngestedFile`, `IngestResult`, `OnyxPayload` structs with JSON tags.
   - Accept: ✅ compiles, used by later packages.
 - **T3 — Transform** (`internal/transform/`)
-  - `ToOnyxPayload()` exactly per §6 (id hashing, title-from-heading, metadata, timestamps).
-  - Accept: ✅ unit tests: deterministic ID across two calls; branch not in ID; local vs git
-    shapes; first-heading title; no-heading fallback; RFC-3339 UTC formatting.
+  - `ToOnyxPayload(f, source, ccPairID, idBase)` exactly per §6 (ID = sha256 over
+    kind + ID base + relpath, title-from-heading, metadata, timestamps).
+  - Accept: ✅ unit tests: deterministic ID across two calls; branch not in ID; same
+    idBase + relpath → same ID regardless of actual origin/root (the migration case);
+    different bases → different IDs; local vs git shapes (kind prefix, link presence);
+    first-heading title; no-heading fallback; RFC-3339 UTC formatting.
 - **T4 — Local directory source** (`internal/source/local.go`)
   - `filepath.WalkDir` + default exclusions + `doublestar` include/exclude + max-depth +
     max-file-size + mtime.
@@ -379,6 +411,7 @@ Run with `go test ./...`.
 | 7 | **`source` enum for non-GitHub/GitLab hosts** (Bitbucket, self-hosted Gitea). | Default `file`; `--source` override available. |
 | 8 | **Very large monorepos**: thousands of md files → long sequential runs. | `--include` scoping + `--limit`; concurrency is a v2 item. |
 | 9 | **Go toolchain on the target machine**: only needed to *build*; the shipped binary is static. | Document build instructions; ship prebuilt binaries for common platforms. |
+| 10 | **Document ID migration**: forks, repo URL changes, and moved local roots change the default ID base → new IDs → previous documents go stale (no delete API, #1). | `--id-base` / `SARD_ID_BASE` override; recommend pinning one canonical base per project (§6). |
 
 ---
 
