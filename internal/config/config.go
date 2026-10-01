@@ -48,6 +48,10 @@ type Flags struct {
 	CCPairID int
 	GitToken string
 	IDBase   string
+	// DryRun marks a --dry-run invocation: the run sends nothing, so the
+	// Onyx credentials (API key, cc-pair id) are not required for it
+	// (docs/PLAN.md §4).
+	DryRun bool
 }
 
 // ErrConfiguration is the sentinel for configuration failures (a required
@@ -83,9 +87,10 @@ func IsConfigurationError(err error) bool {
 // flag override, environment variable, .env file in the current working
 // directory, built-in default — and validates the required values
 // pre-flight. An empty environment variable is treated as unset, so a .env
-// value still applies. A missing .env file is not an error. It returns an
-// *Error wrapping ErrConfiguration when a required value is missing or
-// invalid.
+// value still applies. A missing .env file is not an error. A dry run
+// (Flags.DryRun) sends nothing, so the Onyx credentials are not required
+// for it. It returns an *Error wrapping ErrConfiguration when a required
+// value is missing or invalid.
 func Resolve(flags Flags) (*Settings, error) {
 	dotEnv, err := loadDotEnv(".env")
 	if err != nil {
@@ -107,12 +112,17 @@ func Resolve(flags Flags) (*Settings, error) {
 		ccPairIDStr = pick("", EnvCCPairID, dotEnv)
 	}
 
+	// A dry run sends nothing, so the Onyx credentials are not required
+	// for it (docs/PLAN.md §4). A cc-pair id that is set but not an
+	// integer is an error in either mode.
 	var problems []string
-	if apiKey == "" {
+	if !flags.DryRun && apiKey == "" {
 		problems = append(problems, requiredProblem(EnvAPIKey, "--api-key"))
 	}
 	if ccPairIDStr == "" {
-		problems = append(problems, requiredProblem(EnvCCPairID, "--cc-pair-id"))
+		if !flags.DryRun {
+			problems = append(problems, requiredProblem(EnvCCPairID, "--cc-pair-id"))
+		}
 	} else if _, err := strconv.Atoi(ccPairIDStr); err != nil {
 		problems = append(problems, EnvCCPairID+" must be an integer")
 	}

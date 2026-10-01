@@ -32,11 +32,16 @@
 //     form), or an Onyx 401/403. The auth case is deliberate: the client
 //     fails fast with onyx.ErrAuth because every remaining file would
 //     fail identically, and a rejected key is a credentials problem, so
-//     the run aborts with 2 rather than 1.
+//     the run aborts with 2 rather than 1. Missing Onyx credentials are
+//     a configuration error for a real run only; a dry run sends nothing
+//     and needs none.
 //   - 130 — the run was interrupted (SIGINT via signal.NotifyContext).
 //
 // --dry-run never exits 1 (it sends nothing, so no file can fail); a
-// discovery error in dry-run still exits 2. --limit caps the number of
+// discovery error in dry-run still exits 2. A dry run needs no Onyx
+// credentials (no API key, no cc-pair id): it prints the would-be
+// payloads and sends nothing, so zero configuration is enough
+// (docs/PLAN.md §4). --limit caps the number of
 // files ingested — and the number of payloads printed in a dry-run — and
 // the summary's total (the summary describes the capped set; the
 // skipped count comes from discovery and is unaffected by --limit).
@@ -390,6 +395,7 @@ func Run(args []string) int {
 		CCPairID: p.ccPairID,
 		GitToken: p.token,
 		IDBase:   p.idBase,
+		DryRun:   p.dryRun,
 	})
 	if err != nil {
 		log.Error(err.Error())

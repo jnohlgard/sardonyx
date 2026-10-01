@@ -224,6 +224,68 @@ func TestRequiredValues(t *testing.T) {
 	})
 }
 
+func TestDryRunDoesNotRequireCredentials(t *testing.T) {
+	run := func(t *testing.T, env map[string]string, flags Flags) error {
+		t.Helper()
+		t.Chdir(t.TempDir())
+		clearConfigEnv(t)
+		for k, v := range env {
+			t.Setenv(k, v)
+		}
+		_, err := Resolve(flags)
+		return err
+	}
+
+	t.Run("no credentials at all resolves", func(t *testing.T) {
+		got, err := ResolveWith(t, nil, Flags{DryRun: true})
+		if err != nil {
+			t.Fatalf("Resolve: %v", err)
+		}
+		if got.APIKey != "" || got.CCPairID != 0 {
+			t.Fatalf("Resolve = %+v, want empty credentials", *got)
+		}
+	})
+
+	t.Run("a provided cc pair id is kept", func(t *testing.T) {
+		got, err := ResolveWith(t, map[string]string{EnvCCPairID: "42"}, Flags{DryRun: true})
+		if err != nil {
+			t.Fatalf("Resolve: %v", err)
+		}
+		if got.CCPairID != 42 {
+			t.Fatalf("CCPairID = %d, want 42", got.CCPairID)
+		}
+	})
+
+	t.Run("non-integer cc pair id still errors", func(t *testing.T) {
+		err := run(t, map[string]string{EnvCCPairID: "notanint"}, Flags{DryRun: true})
+		if err == nil {
+			t.Fatal("expected an error, got nil")
+		}
+		if !strings.Contains(err.Error(), EnvCCPairID) || !strings.Contains(err.Error(), "integer") {
+			t.Errorf("error %q does not describe the invalid %s", err, EnvCCPairID)
+		}
+	})
+
+	t.Run("same inputs without DryRun still error", func(t *testing.T) {
+		err := run(t, nil, Flags{})
+		if !IsConfigurationError(err) {
+			t.Fatalf("IsConfigurationError(%v) = false, want true", err)
+		}
+	})
+}
+
+// ResolveWith runs Resolve with the given env values in a fresh temp
+// directory (no .env file can leak in) and returns the Settings.
+func ResolveWith(t *testing.T, env map[string]string, flags Flags) (*Settings, error) {
+	t.Helper()
+	t.Chdir(t.TempDir())
+	clearConfigEnv(t)
+	for k, v := range env {
+		t.Setenv(k, v)
+	}
+	return Resolve(flags)
+}
+
 func TestSecretsNeverInErrors(t *testing.T) {
 	checkNoLeaks := func(t *testing.T, err error) {
 		t.Helper()

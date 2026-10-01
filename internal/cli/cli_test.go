@@ -373,6 +373,35 @@ func TestRunMissingCredentials(t *testing.T) {
 	})
 }
 
+// TestRunDryRunNoCredentials: a dry run sends nothing, so the Onyx
+// credentials are not required for it — with a zero-configuration
+// environment (no API key, no cc-pair id) it still prints the would-be
+// payloads and exits 0 (docs/PLAN.md §4).
+func TestRunDryRunNoCredentials(t *testing.T) {
+	setEnv(t, "", "", "")
+	dir := fixtureDir(t)
+	code, out, _ := runSard(t, "ingest", dir, "--dry-run", "--log-level", "error")
+	if code != 0 {
+		t.Fatalf("exit = %d, want 0", code)
+	}
+	lines := nonEmptyLines(string(out))
+	if len(lines) != 2 {
+		t.Fatalf("printed %d lines, want 2 payloads:\n%s", len(lines), out)
+	}
+	for i, line := range lines {
+		var p models.OnyxPayload
+		if err := json.Unmarshal([]byte(line), &p); err != nil {
+			t.Fatalf("line %d is not valid JSON: %v\n%s", i, err, line)
+		}
+		if p.Document.SemanticIdentifier == "" {
+			t.Errorf("payload %d has an empty semantic_identifier", i)
+		}
+		if p.CCPairID != 0 {
+			t.Errorf("payload %d has cc_pair_id = %d, want 0 (unset)", i, p.CCPairID)
+		}
+	}
+}
+
 // TestRunConfigurationErrors: bad flags and bad inputs are all
 // configuration errors → exit 2.
 func TestRunConfigurationErrors(t *testing.T) {
