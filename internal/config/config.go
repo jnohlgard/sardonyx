@@ -26,6 +26,7 @@ const (
 	EnvAPIKey   = "ONYX_API_KEY"
 	EnvCCPairID = "ONYX_CC_PAIR_ID"
 	EnvGitToken = "GIT_TOKEN"
+	EnvIDBase   = "SARD_ID_BASE"
 )
 
 // Settings holds the resolved configuration. APIKey and GitToken are
@@ -35,6 +36,7 @@ type Settings struct {
 	APIKey   string
 	CCPairID int
 	GitToken string
+	IDBase   string // optional; empty = the source's default ID base (§6)
 }
 
 // Flags carries CLI flag overrides already parsed by the caller (task T7
@@ -45,6 +47,7 @@ type Flags struct {
 	APIKey   string
 	CCPairID int
 	GitToken string
+	IDBase   string
 }
 
 // ErrConfiguration is the sentinel for configuration failures (a required
@@ -95,6 +98,7 @@ func Resolve(flags Flags) (*Settings, error) {
 	}
 	apiKey := pick(flags.APIKey, EnvAPIKey, dotEnv)
 	gitToken := pick(flags.GitToken, EnvGitToken, dotEnv)
+	idBase := pick(flags.IDBase, EnvIDBase, dotEnv)
 
 	ccPairIDStr := ""
 	if flags.CCPairID != 0 {
@@ -122,6 +126,7 @@ func Resolve(flags Flags) (*Settings, error) {
 		APIKey:   apiKey,
 		CCPairID: ccPairID,
 		GitToken: gitToken,
+		IDBase:   idBase,
 	}, nil
 }
 

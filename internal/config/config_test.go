@@ -18,7 +18,7 @@ const (
 // are treated as unset by Resolve, so this makes tests hermetic.
 func clearConfigEnv(t *testing.T) {
 	t.Helper()
-	for _, k := range []string{EnvAPIURL, EnvAPIKey, EnvCCPairID, EnvGitToken} {
+	for _, k := range []string{EnvAPIURL, EnvAPIKey, EnvCCPairID, EnvGitToken, EnvIDBase} {
 		t.Setenv(k, "")
 	}
 }
@@ -38,6 +38,7 @@ func TestResolvePrecedence(t *testing.T) {
 		EnvAPIKey + "=dotenv-key",
 		EnvCCPairID + "=7",
 		EnvGitToken + "=dotenv-token",
+		EnvIDBase + "=dotenv-base",
 	}, "\n")+"\n")
 
 	env := map[string]string{
@@ -45,6 +46,7 @@ func TestResolvePrecedence(t *testing.T) {
 		EnvAPIKey:   "env-key",
 		EnvCCPairID: "8",
 		EnvGitToken: "env-token",
+		EnvIDBase:   "env-base",
 	}
 
 	cases := []struct {
@@ -60,6 +62,7 @@ func TestResolvePrecedence(t *testing.T) {
 				APIKey:   "dotenv-key",
 				CCPairID: 7,
 				GitToken: "dotenv-token",
+				IDBase:   "dotenv-base",
 			},
 		},
 		{
@@ -70,17 +73,19 @@ func TestResolvePrecedence(t *testing.T) {
 				APIKey:   "env-key",
 				CCPairID: 8,
 				GitToken: "env-token",
+				IDBase:   "env-base",
 			},
 		},
 		{
 			name:  "flag beats env beats .env",
-			flags: Flags{APIURL: "https://from-flag.example/api", APIKey: "flag-key", CCPairID: 9, GitToken: "flag-token"},
+			flags: Flags{APIURL: "https://from-flag.example/api", APIKey: "flag-key", CCPairID: 9, GitToken: "flag-token", IDBase: "flag-base"},
 			env:   env,
 			want: Settings{
 				APIURL:   "https://from-flag.example/api",
 				APIKey:   "flag-key",
 				CCPairID: 9,
 				GitToken: "flag-token",
+				IDBase:   "flag-base",
 			},
 		},
 	}
@@ -114,6 +119,21 @@ func TestResolveDefaultAPIURL(t *testing.T) {
 	}
 	if got.APIURL != DefaultAPIURL {
 		t.Fatalf("APIURL = %q, want default %q", got.APIURL, DefaultAPIURL)
+	}
+}
+
+func TestIDBaseOptional(t *testing.T) {
+	t.Chdir(t.TempDir()) // no .env file
+	clearConfigEnv(t)
+	t.Setenv(EnvAPIKey, "some-key")
+	t.Setenv(EnvCCPairID, "42")
+
+	got, err := Resolve(Flags{})
+	if err != nil {
+		t.Fatalf("Resolve: %v", err)
+	}
+	if got.IDBase != "" {
+		t.Fatalf("IDBase = %q, want empty when unset", got.IDBase)
 	}
 }
 
