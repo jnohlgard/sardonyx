@@ -37,14 +37,22 @@
 //
 // --dry-run never exits 1 (it sends nothing, so no file can fail); a
 // discovery error in dry-run still exits 2. --limit caps the number of
-// files ingested — and the number of payloads printed in a dry-run —
-// without changing the summary wording.
+// files ingested — and the number of payloads printed in a dry-run — and
+// the summary's total (the summary describes the capped set; the
+// skipped count comes from discovery and is unaffected by --limit).
 //
 // --branch and --token are git-only flags: for a local directory input
 // they are ignored with a warning (their values are never logged).
 //
-// TODO (T8): polish the summary (elapsed time, cleaner failure list) and
-// add a progress line per file.
+// The run ends with a summary on stderr (docs/PLAN.md §8): a header
+// line — "<verb>: <N> files in <elapsed>" — carrying the created,
+// updated, skipped, and failed counts (a dry run instead reports the
+// number of payloads printed and the skipped count), followed by one
+// "  failed: <file> — <reason>" line per failed file in ingestion
+// (RelPath) order. The elapsed time spans the whole run from before
+// discovery (the git clone dominates) to the last action. During a real
+// run, every file additionally gets a progress line, "[i/N] <file> →
+// created|updated" (info) or "→ failed: <reason>" (warn).
 package cli
 
 import (
@@ -59,6 +67,7 @@ import (
 	"os"
 	"os/signal"
 	"strings"
+	"time"
 
 	"sardonyx/internal/config"
 	"sardonyx/internal/models"
@@ -203,10 +212,13 @@ func configErrorf(format string, args ...any) error {
 }
 
 // discovery is what the source layer produced: the files (sorted by
-// RelPath), the run's default document-ID base, and the default document
-// source for the input.
+// RelPath), the number of files the source dropped in a per-file check
+// (oversize, binary, empty, unreadable; the summary's "skipped"), the
+// run's default document-ID base, and the default document source for
+// the input.
 type discovery struct {
 	files         []models.IngestedFile
+	skipped       int
 	idBase        string
 	defaultSource string
 }
@@ -238,6 +250,7 @@ func discover(src string, p *ingestFlags, settings *config.Settings, log *slog.L
 		}
 		return &discovery{
 			files:         res.Files,
+			skipped:       res.Skipped,
 			idBase:        res.IDBase,
 			defaultSource: models.DocumentSourceFile,
 		}, nil
@@ -273,6 +286,7 @@ func discover(src string, p *ingestFlags, settings *config.Settings, log *slog.L
 	}
 	return &discovery{
 		files:         res.Files,
+		skipped:       res.Skipped,
 		idBase:        res.IDBase,
 		defaultSource: norm.Source,
 	}, nil
@@ -385,6 +399,10 @@ func Run(args []string) int {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
 	defer stop()
 
+	// The summary's elapsed time spans the whole run (docs/PLAN.md §8):
+	// for a git source the clone dominates, so the clock starts before
+	// discovery, not before the ingest loop.
+	start := time.Now()
 	d, err := discover(src, &p, settings, log)
 	if err != nil {
 		log.Error(err.Error())
@@ -409,38 +427,67 @@ func Run(args []string) int {
 	}
 
 	if len(files) == 0 {
-		log.Warn("no markdown files found", "source", src)
+		log.Warn("no markdown files found", "source", src, "skipped", d.skipped)
 		return 0
 	}
 
+	elapsed := time.Since(start)
 	if p.dryRun {
-		return runDry(ctx, files, docSource, settings.CCPairID, idBase, log)
+		return runDry(ctx, files, docSource, settings.CCPairID, idBase, d.skipped, elapsed, log)
 	}
-	return ingestAll(ctx, files, docSource, settings, idBase, log)
+	return ingestAll(ctx, files, docSource, settings, idBase, d.skipped, elapsed, log)
 }
 
 // runDry prints the would-be payload of every file to stdout — one
 // compact JSON document per line, in the source's stable RelPath order —
-// and sends nothing.
-func runDry(ctx context.Context, files []models.IngestedFile, source string, ccPairID int, idBase string, log *slog.Logger) int {
+// and sends nothing. It ends with a summary on stderr (docs/PLAN.md §8):
+// the total, the number of payloads printed, the skipped count from
+// discovery, and the whole-run elapsed time. stdout stays strictly
+// "one JSON payload per file."
+func runDry(ctx context.Context, files []models.IngestedFile, docSource string, ccPairID int, idBase string, skipped int, elapsed time.Duration, log *slog.Logger) int {
+	var printed int
 	for _, f := range files {
 		if ctx.Err() != nil {
 			break
 		}
-		payload := transform.ToOnyxPayload(f, source, ccPairID, idBase)
+		payload := transform.ToOnyxPayload(f, docSource, ccPairID, idBase)
 		b, err := json.Marshal(payload)
 		if err != nil {
 			log.Error("marshaling payload", "file", f.RelPath, "error", err)
 			return 1
 		}
 		fmt.Fprintln(os.Stdout, string(b))
+		printed++
 	}
+
 	if ctx.Err() != nil {
-		log.Warn("run interrupted", "files", len(files))
+		log.Warn(summaryHeader("run interrupted", elapsed, len(files),
+			fmt.Sprintf("printed %d %s, skipped %d", printed, plural(printed, "payload"), skipped)))
 		return 130
 	}
-	log.Info("dry run complete", "files", len(files))
+	log.Info(summaryHeader("dry run complete", elapsed, len(files),
+		fmt.Sprintf("printed %d %s, skipped %d", printed, plural(printed, "payload"), skipped)))
 	return 0
+}
+
+// summaryHeader renders the header line of the end-of-run summary
+// (docs/PLAN.md §8): the verb, the total number of files processed in
+// this run (--limit already applied), the whole-run elapsed time (the
+// timer starts in Run, before discovery — the git clone dominates), and
+// the outcome counts (created/updated/skipped/failed for a real run,
+// payloads printed plus skipped for a dry run). Each failed file
+// additionally gets a follow-up line (ingestAll).
+func summaryHeader(verb string, elapsed time.Duration, total int, counts string) string {
+	return fmt.Sprintf("%s: %d %s in %s — %s", verb, total, plural(total, "file"), elapsed, counts)
+}
+
+// plural renders n as the singular or plural of word ("1 file",
+// "2 files", "1 payload", "2 payloads").
+func plural(n int, word string) string {
+	if n == 1 {
+		return word
+	}
+	return word + "s"
 }
 
 // fileFailure is one failed file for the summary (file + reason).
@@ -450,16 +497,20 @@ type fileFailure struct {
 }
 
 // ingestAll POSTs every file's payload to the Onyx Ingestion API
-// sequentially (docs/PLAN.md §7, §8) and reports the final counts:
-// per-file results are logged during the run, and the summary at the end
-// carries the counts plus the failed files with their reasons. T8 will
-// polish the formatting.
-func ingestAll(ctx context.Context, files []models.IngestedFile, docSource string, settings *config.Settings, idBase string, log *slog.Logger) int {
+// sequentially (docs/PLAN.md §7, §8). Every file gets a progress line
+// on stderr — "[i/N] <file> → created|updated" (info) or
+// "→ failed: <reason>" (warn) — and the run ends with the summary: a
+// header with the counts and the whole-run elapsed time, followed by
+// one "  failed: <file> — <reason>" line per failed file in ingestion
+// (RelPath) order. An Onyx 401/403 aborts with an error line and exit 2
+// before any summary (see the package doc).
+func ingestAll(ctx context.Context, files []models.IngestedFile, docSource string, settings *config.Settings, idBase string, skipped int, elapsed time.Duration, log *slog.Logger) int {
 	client := onyx.NewClient(settings.APIURL, settings.APIKey, settings.CCPairID)
+	total := len(files)
 
 	var created, updated int
 	var failures []fileFailure
-	for _, f := range files {
+	for i, f := range files {
 		if ctx.Err() != nil {
 			break
 		}
@@ -480,24 +531,28 @@ func ingestAll(ctx context.Context, files []models.IngestedFile, docSource strin
 		switch result.Status {
 		case models.ResultCreated:
 			created++
-			log.Info("created", "file", f.RelPath)
+			log.Info(fmt.Sprintf("[%d/%d] %s → created", i+1, total, f.RelPath))
 		case models.ResultUpdated:
 			updated++
-			log.Info("updated", "file", f.RelPath)
+			log.Info(fmt.Sprintf("[%d/%d] %s → updated", i+1, total, f.RelPath))
 		default:
 			failures = append(failures, fileFailure{f.RelPath, result.Reason})
-			log.Warn("ingest failed", "file", f.RelPath, "reason", result.Reason)
+			log.Warn(fmt.Sprintf("[%d/%d] %s → failed: %s", i+1, total, f.RelPath, result.Reason))
 		}
 	}
 
+	counts := fmt.Sprintf("created %d, updated %d, skipped %d, failed %d",
+		created, updated, skipped, len(failures))
 	if ctx.Err() != nil {
-		log.Warn("run interrupted", "total", len(files), "created", created, "updated", updated, "failed", len(failures))
+		log.Warn(summaryHeader("run interrupted", elapsed, total, counts))
+		for _, fl := range failures {
+			log.Warn(fmt.Sprintf("  failed: %s — %s", fl.file, fl.reason))
+		}
 		return 130
 	}
-
-	log.Info("run complete", "total", len(files), "created", created, "updated", updated, "failed", len(failures))
+	log.Info(summaryHeader("run complete", elapsed, total, counts))
 	for _, fl := range failures {
-		log.Warn("failed", "file", fl.file, "reason", fl.reason)
+		log.Warn(fmt.Sprintf("  failed: %s — %s", fl.file, fl.reason))
 	}
 	if len(failures) > 0 {
 		return 1
