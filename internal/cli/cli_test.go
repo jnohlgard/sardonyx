@@ -709,7 +709,7 @@ func TestRunZeroFilesSummary(t *testing.T) {
 		if len(out) != 0 {
 			t.Fatalf("stdout is not empty: %q", out)
 		}
-		line := lineContaining(string(stderr), "no markdown files found")
+		line := lineContaining(string(stderr), "no Markdown files found")
 		if line == "" || !strings.Contains(line, "skipped=0") {
 			t.Fatalf("warning = %q; want skipped=0", line)
 		}
@@ -728,7 +728,7 @@ func TestRunZeroFilesSummary(t *testing.T) {
 		if code != 0 {
 			t.Fatalf("exit = %d, want 0", code)
 		}
-		line := lineContaining(string(stderr), "no markdown files found")
+		line := lineContaining(string(stderr), "no Markdown files found")
 		if line == "" || !strings.Contains(line, "skipped=1") {
 			t.Fatalf("warning = %q; want skipped=1", line)
 		}

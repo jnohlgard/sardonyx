@@ -433,7 +433,7 @@ func Run(args []string) int {
 	}
 
 	if len(files) == 0 {
-		log.Warn("no markdown files found", "source", src, "skipped", d.skipped)
+		log.Warn("no Markdown files found", "source", src, "skipped", d.skipped)
 		return 0
 	}
 
