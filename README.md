@@ -3,11 +3,9 @@
 Ingest **markdown files** from a **git repository URL** or a **local directory** into
 [Onyx](https://onyx.app) via the [Ingestion API](https://docs.onyx.app/developers/guides/index_files_ingestion_api).
 
-> **Status:** 🚧 In implementation — the design lives in [`docs/PLAN.md`](docs/PLAN.md).
-> Tasks T1–T9 (config, models, transform, local directory source, git
-> repository source, Onyx client, CLI wiring, summary & polish, test
-> hardening) are complete; T10 (build & README) is next.
-> See the task list in `docs/PLAN.md` §10.
+> **Status:** ✅ Complete — all implementation tasks T1–T10 are done (task list in
+> `docs/PLAN.md` §10). The tool builds to a single static binary
+> (see [Building](#building)).
 
 ## Why the name
 
@@ -17,7 +15,7 @@ command line tool is simply **`sard`**, the stone's own name: short, easy to
 type, and unambiguous as a CLI. It builds to a single static binary: no
 interpreter or virtualenv needed on the target machine.
 
-## What it will do
+## What it does
 
 ```bash
 sard ingest https://github.com/owner/repo            # all *.md / *.mdx / *.markdown in the repo
@@ -38,24 +36,121 @@ sard ingest https://github.com/owner/repo --include "docs/**" --dry-run
 - Sends each document to `POST {API_BASE_URL}/onyx-api/ingestion` with retry/backoff,
   then prints a summary (created / updated / skipped / failed) and an exit code.
 
-## Prerequisites (Onyx side)
+## Getting started
 
-1. An **Onyx API key** with the `manage:connectors` permission (or `admin` role).
-2. A **Connector / CC-pair**: create one in the Onyx Admin Panel (e.g. a File Connector)
-   and copy its `cc_pair_id` from the URL (`/admin/connector/<cc_pair_id>`).
-   Documents ingested with that `cc_pair_id` appear on the Connectors page.
+### 1. Prerequisites (Onyx side)
+
+You need an Onyx instance (cloud or self-hosted) and two things in it:
+
+1. **An API key with the right permission.** Create an API key in the Onyx
+   Admin Panel (cloud: `cloud.onyx.app/admin`; self-hosted: your deployment's
+   Admin Panel — ask your deployment admin if you cannot create keys
+   yourself) and make sure it carries the **`manage:connectors`** permission
+   or an **admin** role — that is what the
+   [Ingestion API](https://docs.onyx.app/developers/guides/index_files_ingestion_api)
+   requires. (A Group Manager may ingest into the CC-pairs of the groups
+   they manage, but not into the default public pair.)
+2. **A Connector / CC-pair to receive the documents.**
+   1. In the Onyx **Admin Panel**, open the **Connectors** list and create
+      a new connector — a **File Connector** works for plain markdown files.
+   2. Open the created connector and copy its `cc_pair_id` from the URL:
+      `https://cloud.onyx.app/admin/connector/243` → `cc_pair_id = 243`.
+   3. Documents ingested with that `cc_pair_id` appear on the Connectors
+      page under that connector.
+
+### 2. Get `sard`
+
+There is no release pipeline yet, so **build from source**. One static
+binary comes out — the target machine needs no Go toolchain, interpreter, or
+virtualenv.
+
+```bash
+git clone https://github.com/jnohlgard/sardonyx
+cd sardonyx
+CGO_ENABLED=0 go build -ldflags "-X main.version=1.0.0" -o sard ./cmd/sard
+```
+
+- `CGO_ENABLED=0` makes the binary fully static (`file sard` →
+  `… statically linked …`), so it runs on almost any Linux machine.
+- The `-X main.version=…` stamp is optional (it defaults to `dev`).
+- Building needs a Go toolchain (`go 1.24` per `go.mod`) and, for ingesting
+  git repositories at run time, a `git` binary on the target.
+
+Alternative for your own machine: `go install` from the checkout —
+
+```bash
+go install sardonyx/cmd/sard   # lands in $GOBIN (default ~/go/bin)
+```
+
+### 3. First run — dry run (no Onyx credentials needed)
+
+`--dry-run` prints the exact payload that *would* be sent to Onyx — one JSON
+document per line, in stable file order — and sends nothing. It needs **no
+API key and no cc-pair id** (the printed `cc_pair_id` is `0` until you
+provide one), so it works on a machine with zero Onyx configuration:
+
+```bash
+sard ingest https://github.com/owner/repo --dry-run   # from a git repository
+sard ingest ./my-docs --dry-run                       # from a local directory
+```
+
+Inspect the output to confirm discovery and the document shape before you
+spend a real run on it.
+
+> **⚠️ Read this first — stale documents.** The Ingestion API has **no delete
+> endpoint**: a file removed from the source leaves its (stale) document
+> behind in Onyx. Re-running `sard` updates existing documents (upsert by
+> stable ID) but never removes anything. Ingest only the directories you
+> intend to keep; see [Known limitations](#known-limitations-v1) and
+> `docs/PLAN.md` §11 for the discussion.
+
+### 4. Real run
+
+Put your credentials where you like — CLI flag, environment variable, or a
+`.env` file in the working directory (precedence: flag → env → `.env`);
+see [.env.example](.env.example):
+
+```bash
+cp .env.example .env      # then fill in ONYX_API_KEY and ONYX_CC_PAIR_ID
+sard ingest https://github.com/owner/repo
+sard ingest ./my-docs
+```
+
+The first run **creates** the documents; every later run **updates** them
+(same stable IDs). The end-of-run summary on stderr reports
+`created / updated / skipped / failed` and an exit code: `0` all good,
+`1` at least one file failed, `2` configuration/credentials error,
+`130` interrupted.
+
+## Building
+
+The standard build recipe (static binary, version-stamped):
+
+```bash
+CGO_ENABLED=0 go build -ldflags "-X main.version=1.0.0" -o sard ./cmd/sard
+```
+
+- `CGO_ENABLED=0` → single static binary, no shared-library dependencies.
+- `-X main.version=<version>` → stamps the build's version string
+  (default `dev` when omitted).
+- Cross-compiling works the same way with a target prefix, e.g.
+  `CGO_ENABLED=0 GOOS=windows GOARCH=amd64 go build … -o sard.exe`.
 
 ## Configuration
 
-Priority: CLI flag → environment variable → `.env` file.
+Priority: CLI flag → environment variable → `.env` file (current working directory).
 
 | Env var           | Purpose                                   | Default                     |
 | ----------------- | ----------------------------------------- | --------------------------- |
 | `ONYX_API_URL`    | Onyx API base URL                         | `https://cloud.onyx.app/api`|
-| `ONYX_API_KEY`    | Bearer API key                            | *(required)*                |
-| `ONYX_CC_PAIR_ID` | Connector-credential pair id for the docs | *(required for the UI)*     |
+| `ONYX_API_KEY`    | Bearer API key                            | *(required for real runs)*  |
+| `ONYX_CC_PAIR_ID` | Connector-credential pair id for the docs | *(required for real runs)*  |
 | `GIT_TOKEN`       | Token for private repos (injected into the clone URL) | *(optional)*   |
 | `SARD_ID_BASE`    | Arbitrary document-ID base for the run (affects the ID only; PLAN §6) | *(optional)* |
+
+`ONYX_API_KEY` and `ONYX_CC_PAIR_ID` are only required for real ingestion
+runs; `--dry-run` needs neither (it sends nothing). All other flags are
+documented by `sard ingest --help` and in `docs/PLAN.md` §4.
 
 See [`.env.example`](.env.example).
 
@@ -66,15 +161,15 @@ docs/
   PLAN.md                # full implementation plan + task breakdown (T1–T10)
   onyx-ingestion-api.md  # condensed reference for the Onyx Ingestion API
 cmd/sard/
-  main.go                # thin entry point: run + exit code        (T7)
+  main.go                # thin entry point: run + exit code
 internal/
-  cli/cli.go             # flags, pipeline orchestration, summary   (T7, T8)
-  config/config.go       # flags > env > .env resolution            (T1)
-  models/models.go       # IngestedFile / IngestResult / OnyxPayload (T2)
-  source/git.go          # URL normalization, shallow clone, git ls-files (T5)
-  source/local.go        # directory walk, filters, mtime           (T4)
-  transform/markdown.go  # IngestedFile → Onyx payload              (T3)
-  onyx/client.go         # HTTP client, retries, result mapping     (T6)
+  cli/cli.go             # flags, pipeline orchestration, summary
+  config/config.go       # flags > env > .env resolution
+  models/models.go       # IngestedFile / IngestResult / OnyxPayload
+  source/git.go          # URL normalization, shallow clone, git ls-files
+  source/local.go        # directory walk, filters, mtime
+  transform/markdown.go  # IngestedFile → Onyx payload
+  onyx/client.go         # HTTP client, retries, result mapping
 ```
 
 Tests live next to the code in each package as `*_test.go` (mock Onyx server
