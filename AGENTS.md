@@ -1,6 +1,6 @@
 # AGENTS.md
 
-`sard` — a Go CLI (module `sardonyx`) that ingests markdown files from a
+`sard` — a Go CLI (module `sardonyx`) that ingests Markdown files from a
 git repo URL or a local directory into Onyx via the Ingestion API.
 
 ## Status
