@@ -1,0 +1,19 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" width="32" height="32">
+  <title>sardonyx</title>
+  <defs>
+    <path id="nodule" d="M7.2 8.4 C10.6 4.3 20.4 3.4 24.9 7.1 C28.9 10.4 29.5 17.6 27 22 C24.5 26.5 18.9 29 13.8 28 C8 27 4.2 22.5 4 17.5 C3.8 13.7 5.2 10.9 7.2 8.4 Z"/>
+    <clipPath id="clip">
+      <use href="#nodule"/>
+    </clipPath>
+  </defs>
+  <g clip-path="url(#clip)">
+    <rect width="32" height="32" fill="#7A1F12"/>
+    <path d="M0 10.5 C10 9 20 11.5 32 9.4 L32 32 L0 32 Z" fill="#F3E9D8"/>
+    <path d="M0 15 C10 13.2 20 14.2 32 11.6 L32 32 L0 32 Z" fill="#C4532F"/>
+    <path d="M0 19.5 C10 18 20 17.6 32 14.4 L32 32 L0 32 Z" fill="#F3E9D8"/>
+    <path d="M0 21 C10 19.9 20 19.6 32 16.6 L32 32 L0 32 Z" fill="#A83D22"/>
+    <path d="M0 24.4 C10 23.3 20 22.4 32 19.2 L32 32 L0 32 Z" fill="#4A1A12"/>
+    <ellipse cx="12" cy="10" rx="5" ry="1.8" transform="rotate(-18 12 10)" fill="#FFFFFF" opacity="0.3"/>
+  </g>
+  <use href="#nodule" fill="none" stroke="#2B1A17" stroke-width="2" stroke-linejoin="round"/>
+</svg>

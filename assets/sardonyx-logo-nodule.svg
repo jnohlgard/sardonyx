@@ -1,0 +1,31 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
+  <title>sardonyx</title>
+  <defs>
+    <!-- irregular, rounded nodule outline: how sardonyx forms in nature -->
+    <path id="nodule" d="M118 138 C172 72 326 58 398 116 C462 168 472 282 432 352 C392 422 302 462 220 446 C128 430 68 360 64 280 C60 220 84 178 118 138 Z"/>
+    <clipPath id="clip">
+      <use href="#nodule"/>
+    </clipPath>
+  </defs>
+
+  <g clip-path="url(#clip)">
+    <!-- strata of uneven width that converge toward the right, like natural deposition -->
+    <rect width="512" height="512" fill="#7A1F12"/>
+    <path d="M40 168 C190 144 320 184 472 150 L472 512 L40 512 Z" fill="#EFE4D2"/>
+    <path d="M40 214 C190 192 320 216 472 172 L472 512 L40 512 Z" fill="#E4D3BC"/>
+    <path d="M40 244 C190 214 320 230 472 190 L472 512 L40 512 Z" fill="#C4532F"/>
+    <path d="M40 312 C190 288 320 282 472 230 L472 512 L40 512 Z" fill="#F6EEE1"/>
+    <path d="M40 334 C190 314 320 304 472 248 L472 512 L40 512 Z" fill="#A83D22"/>
+    <path d="M40 390 C190 368 320 350 472 290 L472 512 L40 512 Z" fill="#4A1A12"/>
+    <path d="M40 424 C190 404 320 384 472 318 L472 512 L40 512 Z" fill="#6B2516"/>
+    <path d="M40 436 C190 418 320 398 472 330 L472 512 L40 512 Z" fill="#4A1A12"/>
+
+    <!-- soft polish sheen -->
+    <ellipse cx="200" cy="170" rx="110" ry="46" transform="rotate(-18 200 170)" fill="#FFFFFF" opacity="0.18"/>
+    <ellipse cx="170" cy="150" rx="40" ry="14" transform="rotate(-18 170 150)" fill="#FFFFFF" opacity="0.35"/>
+  </g>
+
+  <!-- outer rind of the nodule -->
+  <use href="#nodule" fill="none" stroke="#2B1A17" stroke-width="30" stroke-linejoin="round"/>
+  <use href="#nodule" fill="none" stroke="#CDBFA8" stroke-width="14" stroke-linejoin="round"/>
+</svg>
