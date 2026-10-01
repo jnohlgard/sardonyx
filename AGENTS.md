@@ -4,11 +4,13 @@
 git repo URL or a local directory into Onyx via the Ingestion API.
 
 ## Status
-- T1–T8 are complete (config, models, transform, local directory source,
+- T1–T9 are complete (config, models, transform, local directory source,
   git repository source, Onyx client, CLI wiring, summary & polish —
   progress lines, summary with elapsed time and failure list, and the
-  source layer's skipped count). Next up is T9 (test hardening), then T10,
-  in `docs/PLAN.md` order. No stub packages remain.
+  source layer's skipped count; plus test hardening — edge-case tests
+  for CRLF, non-UTF-8, oversize, monorepo depth, and .mdx frontmatter,
+  and the two URL-normalization coverage gaps closed). Next up is
+  T10 (build & README), in `docs/PLAN.md` order. No stub packages remain.
 
 ## Naming
 - Repo/Go module is `sardonyx`; the binary and command are `sard`.

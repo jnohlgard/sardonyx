@@ -1,9 +1,9 @@
 # sardonyx — Implementation Plan
 
-**Status:** 🚧 T1–T8 complete (config, models, transform, local directory
+**Status:** 🚧 T1–T9 complete (config, models, transform, local directory
 source, git repository source, Onyx client, CLI wiring, summary &
-polish); next up is T9 (Test hardening). Implement tasks T9–T10 in §10
-in order; no stub packages remain.
+polish, test hardening); next up is T10 (Build & README). Implement
+task T10 in §10; no stub packages remain.
 
 **Language:** Go (switched from Python, 2026-10 — motivation: a single static
 binary that needs no interpreter or virtualenv on the target machine). The
@@ -185,6 +185,42 @@ Decisions made while implementing T8 (summary & polish):
   `httptest` mock is the reference for the summary (recorded in the T8
   acceptance line). The harness captures stderr as well as stdout, so the
   summary is asserted like any other output.
+
+Decisions made while implementing T9 (test hardening):
+
+- **Coverage gate, per function (Q1).** The gate "≥ 90% on URL
+  normalization" is read per function, not per package: the source
+  package as a whole stays under 90% (its clone/collect I/O is
+  exercised by integration tests, which coverage does not count), so
+  the gate is ≥ 90% for each of the URL-normalization functions in
+  `git.go` (NormalizeURL, remoteOrigin, fileOrigin, userinfo,
+  sourceForHost, repoLabel, stripGitSuffix, CloneURL, sectionLink,
+  redact), plus ≥ 90% for the `config` and `transform` packages.
+  After T9: all ten functions at 100% (both known gaps closed — the
+  `url.Parse` error branch, `stripGitSuffix`'s slash-less path),
+  `config` at 93.5%, `transform` at 100%. T10 inherits this
+  reading of the acceptance line.
+- **"Very long single file" (Q2).** Interpreted as (a) a large
+  (512 KiB) single-line, in-limit file ingests cleanly with a stable
+  ID and the basename title, and (b) the oversize boundary: a file
+  exactly at `--max-file-size` is kept, one byte over is skipped. No
+  multi-MB content is manufactured; the suite stays fast.
+- **CRLF on the git path (Q3).** Covered by a dedicated fixture
+  (TestGitCRLF): the fixture repo commits with
+  `core.autocrlf=false`, and hermetic `GIT_CONFIG_GLOBAL` /
+  `GIT_CONFIG_SYSTEM` pin the clone's checkout, so line endings cannot
+  be rewritten by the test machine's configuration.
+- **Config per-function gaps (Q4).** Not closed: the gate is per this
+  plan's wording (the `config` package at ≥ 90%), which already passes
+  at 93.5%; `Error` (66.7%) and `loadDotEnv` (83.3%) stay as-is rather
+  than manufactured.
+- **Frontmatter and titles.** The §6 naive "first `# ` line" title is
+  kept. T9 asserts that fence lines and key/value bodies never act as
+  the heading, that the first heading after the fence is the title,
+  and that content is ingested verbatim (no stripping — §6 keeps
+  frontmatter as-is in v1). A YAML *comment* line inside a fence would
+  still be picked up by the naive scan; a fence-aware title is a v2
+  item, not a T9 fix.
 
 Examples (to be documented in README once implemented):
 
@@ -504,8 +540,12 @@ Run with `go test ./...`.
     summary (exit 130).
 - **T9 — Test hardening**
   - Edge cases: CRLF, non-UTF-8, very long single file, monorepo depth, `.mdx` frontmatter.
-  - Accept: ⬜ full `go test ./...` green; `go test -cover` ≥ 90 % on the pure-function
-    packages (`config`, `transform`, URL normalization).
+  - Accept: ✅ full `go test ./...` green; coverage gate — `config` ≥ 90 %
+    (93.5 %), `transform` ≥ 90 % (100 %), and each URL-normalization
+    function in `internal/source/git.go` ≥ 90 % (all ten at 100 % after
+    closing the two known gaps — the `url.Parse` error branch and the
+    slash-less `stripGitSuffix` path). The gate is per function for the
+    URL normalization, not for the source package as a whole (§4).
 - **T10 — Build & README**
   - Build a single static binary: `CGO_ENABLED=0 go build -ldflags "-X main.version=…"
     -o sard ./cmd/sard`; README quickstart (prebuilt binary or `go install
