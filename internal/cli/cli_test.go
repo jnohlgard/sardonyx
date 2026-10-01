@@ -141,7 +141,7 @@ func (m *mockOnyx) recorded() (payload []models.OnyxPayload, auths []string) {
 	return append([]models.OnyxPayload(nil), m.payload...), append([]string(nil), m.auths...)
 }
 
-// fixtureDir builds a temp directory with two markdown files in stable
+// fixtureDir builds a temp directory with two Markdown files in stable
 // RelPath order (a.md, docs/b.md).
 func fixtureDir(t *testing.T) string {
 	t.Helper()
@@ -433,7 +433,7 @@ func TestRunConfigurationErrors(t *testing.T) {
 	}
 }
 
-// TestRunZeroFiles: an empty directory finds no markdown files — a
+// TestRunZeroFiles: an empty directory finds no Markdown files — a
 // warning, exit 0, and no payloads (dry-run) or requests (ingest).
 func TestRunZeroFiles(t *testing.T) {
 	setEnv(t, "test-key", "7", "")
