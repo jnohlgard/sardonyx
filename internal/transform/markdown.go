@@ -61,7 +61,7 @@ func documentID(kind, idBase, relPath string) string {
 // followed by a space — or the file's basename when no such heading exists
 // (docs/PLAN.md §6).
 func headingTitle(content, relPath string) string {
-	for _, line := range strings.Split(content, "\n") {
+	for line := range strings.SplitSeq(content, "\n") {
 		trimmed := strings.TrimLeft(line, " \t")
 		if strings.HasPrefix(trimmed, "# ") {
 			if rest := strings.TrimSpace(trimmed[2:]); rest != "" {

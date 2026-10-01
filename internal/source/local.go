@@ -24,6 +24,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strings"
 	"unicode/utf8"
@@ -190,7 +191,7 @@ func gitListMarkdown(root string) ([]string, error) {
 		return nil, err
 	}
 	var files []string
-	for _, line := range strings.Split(string(out), "\n") {
+	for line := range strings.SplitSeq(string(out), "\n") {
 		if line == "" {
 			continue
 		}
@@ -379,10 +380,5 @@ func isMarkdown(name string) bool {
 // isNoiseDir reports whether name is one of the default excluded directory
 // names (walk mode only).
 func isNoiseDir(name string) bool {
-	for _, n := range defaultNoiseDirs {
-		if name == n {
-			return true
-		}
-	}
-	return false
+	return slices.Contains(defaultNoiseDirs, name)
 }

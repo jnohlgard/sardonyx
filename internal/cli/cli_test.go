@@ -56,7 +56,7 @@ func runSard(t *testing.T, args ...string) (code int, stdout, stderr []byte) {
 // quoted inside the TextHandler's msg= field; the needle is a
 // quote-free fragment of the message).
 func lineContaining(s, needle string) string {
-	for _, line := range strings.Split(s, "\n") {
+	for line := range strings.SplitSeq(s, "\n") {
 		if strings.Contains(line, needle) {
 			return line
 		}
@@ -74,8 +74,8 @@ func assertElapsed(t *testing.T, line string) {
 		t.Fatalf("no elapsed field in summary line %q", line)
 	}
 	token := rest
-	if j := strings.IndexByte(rest, ' '); j >= 0 {
-		token = rest[:j]
+	if before, _, ok := strings.Cut(rest, " "); ok {
+		token = before
 	}
 	d, err := time.ParseDuration(token)
 	if err != nil {
@@ -164,7 +164,7 @@ func fixtureDir(t *testing.T) string {
 
 func nonEmptyLines(s string) []string {
 	var out []string
-	for _, line := range strings.Split(strings.TrimRight(s, "\n"), "\n") {
+	for line := range strings.SplitSeq(strings.TrimRight(s, "\n"), "\n") {
 		if strings.TrimSpace(line) != "" {
 			out = append(out, line)
 		}

@@ -71,6 +71,7 @@ import (
 	"log/slog"
 	"os"
 	"os/signal"
+	"slices"
 	"strings"
 	"time"
 
@@ -170,10 +171,8 @@ func buildLogger(level string) (*slog.Logger, error) {
 // environment value.
 func validate(p *ingestFlags) error {
 	if p.source != "" {
-		for _, v := range validSources {
-			if v == p.source {
-				return nil
-			}
+		if slices.Contains(validSources, p.source) {
+			return nil
 		}
 		return fmt.Errorf("invalid --source %q (want %s)", p.source, strings.Join(validSources, " | "))
 	}

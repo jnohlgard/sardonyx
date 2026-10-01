@@ -110,9 +110,9 @@ func NormalizeURL(raw string) (NormalizedURL, error) {
 	}
 
 	if !strings.Contains(s, "://") {
-		if at := strings.IndexByte(s, '@'); at != -1 {
+		if _, after, ok := strings.Cut(s, "@"); ok {
 			// scp-like ssh form: user@host:path (no "://").
-			rest := s[at+1:]
+			rest := after
 			if colon := strings.IndexByte(rest, ':'); colon > 0 {
 				path := strings.TrimPrefix(rest[colon+1:], "/")
 				return remoteOrigin("https", rest[:colon], path, "", true)
@@ -239,7 +239,7 @@ func repoLabel(parts []string) string {
 func stripGitSuffix(path string) string {
 	if i := strings.LastIndexByte(path, '/'); i >= 0 {
 		last := path[i+1:]
-		if s := strings.TrimSuffix(last, ".git"); s != last {
+		if s, ok := strings.CutSuffix(last, ".git"); ok {
 			return path[:i+1] + s
 		}
 		return path
@@ -260,7 +260,7 @@ func (n NormalizedURL) CloneURL(token string) string {
 	if n.Local {
 		return n.URL
 	}
-	scheme := strings.SplitN(n.URL, "://", 2)[0]
+	scheme, _, _ := strings.Cut(n.URL, "://")
 	if n.Auth != "" {
 		return scheme + "://" + n.Auth + "@" + n.Host + "/" + n.Path
 	}
