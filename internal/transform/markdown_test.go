@@ -5,6 +5,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"reflect"
+	"strings"
 	"testing"
 	"time"
 
@@ -176,6 +177,34 @@ func TestHeadingTitle(t *testing.T) {
 				t.Errorf("Title = %q, want %q", got, tc.want)
 			}
 		})
+	}
+}
+
+// TestLargeSingleLineFile: a large (512 KiB) single-line file with no
+// heading maps cleanly — the title falls back to the basename, the
+// section carries the full content, and the ID is stable and
+// deterministic across identical calls (T9 edge case: very long single
+// file).
+func TestLargeSingleLineFile(t *testing.T) {
+	content := strings.Repeat("x", 512*1024)
+	f := localFile()
+	f.RelPath = "logs/big.md"
+	f.Content = content
+
+	p1 := ToOnyxPayload(f, models.DocumentSourceFile, 42, "base")
+	p2 := ToOnyxPayload(f, models.DocumentSourceFile, 42, "base")
+	if p1.Document.ID != p2.Document.ID {
+		t.Errorf("two identical calls produced different IDs: %q vs %q", p1.Document.ID, p2.Document.ID)
+	}
+	if want := wantID(models.KindLocal, "base", "logs/big.md"); p1.Document.ID != want {
+		t.Errorf("ID = %q, want %q", p1.Document.ID, want)
+	}
+	if p1.Document.Title != "big.md" {
+		t.Errorf("Title = %q, want the basename %q (no heading in the file)", p1.Document.Title, "big.md")
+	}
+	if p1.Document.Sections[0].Text != content {
+		t.Errorf("section text = %d bytes, want the full %d-byte content",
+			len(p1.Document.Sections[0].Text), len(content))
 	}
 }
 

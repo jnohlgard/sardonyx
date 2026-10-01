@@ -291,6 +291,57 @@ func TestLocalCRLF(t *testing.T) {
 	}
 }
 
+// TestMaxFileSizeBoundary: the oversize check is "strictly larger" — a
+// file exactly at the limit is kept, one byte over is skipped with a
+// warning and counted in Skipped (T9 edge case: the boundary; the
+// existing max-file-size subtest of TestLocalWalk covers the clearly
+// over case).
+func TestMaxFileSizeBoundary(t *testing.T) {
+	root := t.TempDir()
+	writeTree(t, root, map[string]string{
+		"at/limit.md":   strings.Repeat("a", 1024), // exactly 1 KiB
+		"over/limit.md": strings.Repeat("b", 1025), // one byte over
+	})
+
+	var buf bytes.Buffer
+	log := slog.New(slog.NewTextHandler(&buf, nil))
+	res, err := Local(root, LocalOptions{MaxFileSizeKiB: 1}, log)
+	if err != nil {
+		t.Fatalf("Local: %v", err)
+	}
+	files := wantPaths(t, res.Files, "at/limit.md")
+	if got := files[0].Content; got != strings.Repeat("a", 1024) {
+		t.Errorf("at-limit Content = %d bytes, want 1024", len(got))
+	}
+	if res.Skipped != 1 {
+		t.Errorf("Skipped = %d, want 1 (the one-byte-over file)", res.Skipped)
+	}
+	if !strings.Contains(buf.String(), "skipping file larger than max file size") {
+		t.Errorf("expected the oversize warning in log output:\n%s", buf.String())
+	}
+}
+
+// TestLargeFileInLimit: a large (512 KiB) single-line file within
+// MaxFileSizeKiB is ingested with its content intact and nothing
+// skipped (T9 edge case: very long single file).
+func TestLargeFileInLimit(t *testing.T) {
+	root := t.TempDir()
+	const big = 512 * 1024
+	writeTree(t, root, map[string]string{"big/single.md": strings.Repeat("x", big)})
+
+	res, err := Local(root, LocalOptions{MaxFileSizeKiB: 1024}, discard()) // the CLI default
+	if err != nil {
+		t.Fatalf("Local: %v", err)
+	}
+	files := wantPaths(t, res.Files, "big/single.md")
+	if got := files[0].Content; got != strings.Repeat("x", big) {
+		t.Errorf("Content = %d bytes, want the full %d-byte single line", len(got), big)
+	}
+	if res.Skipped != 0 {
+		t.Errorf("Skipped = %d, want 0", res.Skipped)
+	}
+}
+
 // TestRepairUTF8: the shared UTF-8 repair (docs/PLAN.md §5.3, used by
 // both sources) — one U+FFFD per invalid byte including multi-byte
 // garbage runs, a genuine U+FFFD (a valid 3-byte sequence) passes
