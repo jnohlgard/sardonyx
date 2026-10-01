@@ -4,7 +4,7 @@ Ingest **markdown files** from a **git repository URL** or a **local directory**
 [Onyx](https://onyx.app) via the [Ingestion API](https://docs.onyx.app/developers/guides/index_files_ingestion_api).
 
 > **Status:** 🚧 In implementation — the design lives in [`docs/PLAN.md`](docs/PLAN.md).
-> Task T1 (config resolution, `internal/config`) is complete; T2–T10 are still
+> Tasks T1–T3 (config, models, transform) are complete; T4–T10 are still
 > stubs. See the task list in `docs/PLAN.md` §10.
 
 ## Why the name
@@ -29,10 +29,10 @@ sard ingest https://github.com/owner/repo --include "docs/**" --dry-run
   - stable, **deterministic document IDs** → re-running updates existing documents
     instead of duplicating them (upsert semantics, `already_existed`),
   - `semantic_identifier` like `owner/repo/path/to/file.md`,
-  - title extracted from the first `#` heading,
+  - title extracted from the first `#` heading (falls back to the filename),
   - section `link` pointing at the GitHub blob URL where applicable,
   - `doc_updated_at` from the last commit (git) or file mtime (local),
-  - metadata tags: repo, path, commit SHA.
+  - metadata tags: repo, path, commit SHA, and `ingested_by: sardonyx`.
 - Sends each document to `POST {API_BASE_URL}/onyx-api/ingestion` with retry/backoff,
   then prints a summary (created / updated / skipped / failed) and an exit code.
 
@@ -53,6 +53,7 @@ Priority: CLI flag → environment variable → `.env` file.
 | `ONYX_API_KEY`    | Bearer API key                            | *(required)*                |
 | `ONYX_CC_PAIR_ID` | Connector-credential pair id for the docs | *(required for the UI)*     |
 | `GIT_TOKEN`       | Token for private repos (injected into the clone URL) | *(optional)*   |
+| `SARD_ID_BASE`    | Arbitrary document-ID base for the run (affects the ID only; PLAN §6) | *(optional)* |
 
 See [`.env.example`](.env.example).
 
