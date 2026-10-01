@@ -7,6 +7,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"reflect"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -271,6 +272,76 @@ func TestLocalWalk(t *testing.T) {
 			"docs/api/reference.md", "docs/intro.md", "exclude/never.md",
 			"guide.mdx", "include/only.mdx", "notes.markdown")
 	})
+}
+
+// deepTree is the T9 monorepo fixture: one markdown file at every depth
+// from 1 to 12 below the root (d/, d/d/, …).
+func deepTree() map[string]string {
+	files := map[string]string{}
+	for d := 1; d <= 12; d++ {
+		files[strings.Repeat("d/", d-1)+"leaf.md"] = "# Depth " + strconv.Itoa(d) + "\n"
+	}
+	return files
+}
+
+// deepSorted returns the deepTree paths in the sorted order collectFiles
+// produces: the deeper paths sort first ("d/d/…" < "d/leaf.md" because
+// "/" sorts before "l"), the root-level file last.
+func deepSorted() []string {
+	var want []string
+	for d := 12; d >= 2; d-- {
+		want = append(want, strings.Repeat("d/", d-1)+"leaf.md")
+	}
+	return append(want, "leaf.md")
+}
+
+// TestLocalWalkDepthBoundary: the depth boundary in walk mode (T9 edge
+// case: monorepo depth) — a file at exactly MaxDepth is included, one at
+// MaxDepth+1 is excluded, MaxDepth 0 is unlimited. In walk mode a
+// directory at depth >= MaxDepth is pruned whole during the walk
+// (local.go:244), so its entire subtree never reaches collectFiles.
+func TestLocalWalkDepthBoundary(t *testing.T) {
+	root := t.TempDir()
+	writeTree(t, root, deepTree())
+
+	res, err := Local(root, LocalOptions{}, discard())
+	if err != nil {
+		t.Fatalf("Local: %v", err)
+	}
+	wantPaths(t, res.Files, deepSorted()...)
+
+	res, err = Local(root, LocalOptions{MaxDepth: 3}, discard())
+	if err != nil {
+		t.Fatalf("Local(MaxDepth): %v", err)
+	}
+	// The depth-3 file is included; the depth-4+ files sit inside the
+	// pruned depth-3 directory and are excluded with it.
+	wantPaths(t, res.Files, "d/d/leaf.md", "d/leaf.md", "leaf.md")
+}
+
+// TestLocalGitModeDepth: in git mode (the input is a repository, so
+// candidates come from git ls-files) there is no walk-time directory
+// pruning — the depth filter is collectFiles' per-file check
+// (local.go:269): a file at exactly MaxDepth is included, one at
+// MaxDepth+1 is excluded (T9 edge case: monorepo depth). Skipped when
+// git is not on PATH.
+func TestLocalGitModeDepth(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git not on PATH")
+	}
+
+	root := t.TempDir()
+	runGit(t, root, "init", "-q", "-b", "main", ".")
+	writeTree(t, root, deepTree())
+	runGit(t, root, "add", "-A")
+	runGit(t, root, "-c", "user.name=test", "-c", "user.email=test@example.com",
+		"commit", "-q", "-m", "deep tree")
+
+	res, err := Local(root, LocalOptions{MaxDepth: 4}, discard())
+	if err != nil {
+		t.Fatalf("Local: %v", err)
+	}
+	wantPaths(t, res.Files, "d/d/d/leaf.md", "d/d/leaf.md", "d/leaf.md", "leaf.md")
 }
 
 // TestLocalCRLF: CRLF line endings round-trip through discovery — the

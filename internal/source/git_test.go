@@ -609,6 +609,46 @@ func hermeticGitConfig(t *testing.T) {
 	t.Setenv("GIT_CONFIG_SYSTEM", filepath.Join(t.TempDir(), "system"))
 }
 
+// TestGitDepthBoundary: the git source's per-file depth check
+// (git.go:514) on a deep fixture tree (T9 edge case: monorepo depth) —
+// a file at exactly MaxDepth is included, one at MaxDepth+1 excluded,
+// MaxDepth 0 unlimited. Skipped when git is not on PATH.
+func TestGitDepthBoundary(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git not on PATH (a runtime dependency, docs/PLAN.md §12)")
+	}
+
+	root := t.TempDir()
+	runGit(t, root, "init", "-q", "-b", "main", ".")
+	// Depth counts path components: depth 1 is directly under the root.
+	writeTree(t, root, map[string]string{
+		"a/b/c/four.md":    "# Depth four\n",
+		"a/b/c/d/five.md":  "# Depth five\n",
+		"a/b/c/d/e/six.md": "# Depth six\n",
+	})
+	runGit(t, root, "add", "-A")
+	runGit(t, root, "-c", "user.name=test", "-c", "user.email=test@example.com",
+		"commit", "-q", "-m", "deep tree")
+
+	res, err := Git(root, GitOptions{Branch: "main", MaxDepth: 4}, discard())
+	if err != nil {
+		t.Fatalf("Git(MaxDepth=4): %v", err)
+	}
+	wantPaths(t, res.Files, "a/b/c/four.md")
+
+	res, err = Git(root, GitOptions{Branch: "main", MaxDepth: 5}, discard())
+	if err != nil {
+		t.Fatalf("Git(MaxDepth=5): %v", err)
+	}
+	wantPaths(t, res.Files, "a/b/c/d/five.md", "a/b/c/four.md")
+
+	res, err = Git(root, GitOptions{Branch: "main"}, discard())
+	if err != nil {
+		t.Fatalf("Git(MaxDepth=0): %v", err)
+	}
+	wantPaths(t, res.Files, "a/b/c/d/e/six.md", "a/b/c/d/five.md", "a/b/c/four.md")
+}
+
 // TestGitCRLF: CRLF bytes committed to a fixture repository survive the
 // shallow clone — the record's Content keeps the \r bytes exactly
 // (T9 edge case: CRLF on the git path).
