@@ -1,3 +1,13 @@
+// Copyright (C) 2026 Joakim Nohlgård
+//
+// This program is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Affero General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// This program is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY of any kind. See LICENSE for the full text.
+
 // Tests for the Onyx client against net/http/httptest (docs/PLAN.md §10,
 // T6). Retry waits are injected at millisecond scale through the
 // unexported backoff field, so the tests stay fast; production clients

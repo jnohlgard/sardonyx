@@ -1,3 +1,13 @@
+// Copyright (C) 2026 Joakim Nohlgård
+//
+// This program is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Affero General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// This program is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY of any kind. See LICENSE for the full text.
+
 // End-to-end smoke tests for the CLI (docs/PLAN.md §10, T7). They invoke
 // Run — the same entry function cmd/sard uses — with a temp-dir fixture
 // and a mock Onyx server (net/http/httptest; stdlib only).

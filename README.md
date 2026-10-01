@@ -189,3 +189,8 @@ via `net/http/httptest`); git fixtures live under `internal/source/testdata/`.
 - [Onyx Ingestion API notes](docs/onyx-ingestion-api.md).
 - Official guide: <https://docs.onyx.app/developers/guides/index_files_ingestion_api>
 - Onyx core concepts: <https://docs.onyx.app/developers/core_concepts>
+
+## License
+
+Released under the [GNU Affero General Public License v3.0](https://www.gnu.org/licenses/agpl-3.0)
+(AGPL-3.0, or a later version at your option). See [LICENSE](LICENSE).
