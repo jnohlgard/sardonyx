@@ -1,6 +1,6 @@
 # syntax=docker/dockerfile:1
 #
-# sard — the sardonyx CLI as a single static binary on FROM scratch.
+# sard — the Sardonyx CLI as a single static binary on FROM scratch.
 #
 # Build (buildx; COPY --link requires BuildKit ≥ 0.11):
 #   docker buildx build \
