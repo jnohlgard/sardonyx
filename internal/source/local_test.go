@@ -291,6 +291,45 @@ func TestLocalCRLF(t *testing.T) {
 	}
 }
 
+// TestRepairUTF8: the shared UTF-8 repair (docs/PLAN.md §5.3, used by
+// both sources) — one U+FFFD per invalid byte including multi-byte
+// garbage runs, a genuine U+FFFD (a valid 3-byte sequence) passes
+// through as a single rune, and valid multi-byte characters are
+// untouched (T9 edge case: non-UTF-8).
+func TestRepairUTF8(t *testing.T) {
+	// A genuine U+FFFD in the source text: one rune, encoded EF BF BD.
+	const fffd = "\uFFFD"
+	cases := []struct {
+		name string
+		in   []byte
+		want string
+	}{
+		{"valid ASCII unchanged", []byte("plain text\n"), "plain text\n"},
+		{"valid multi-byte unchanged", []byte("café naïve — em dash\n"), "café naïve — em dash\n"},
+		{"single invalid byte", []byte("a\xffb"), "a" + fffd + "b"},
+		{"multi-byte garbage run, one replacement per byte", []byte{'h', 0x80, 0x81, 0x82, 'i'},
+			"h" + fffd + fffd + fffd + "i"},
+		{"truncated multi-byte sequence at end", []byte("end\xc3"), "end" + fffd},
+		{"genuine U+FFFD passes through unchanged", []byte("x\uFFFD y"), "x\uFFFD y"},
+		{"mixed valid UTF-8 and invalid bytes", []byte("hé\x80llö\xc3"), "hé" + fffd + "llö" + fffd},
+		{"empty", []byte{}, ""},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := repairUTF8(tc.in)
+			if got != tc.want {
+				t.Errorf("repairUTF8(%q) = %q (runes: %v), want %q (runes: %v)",
+					string(tc.in), got, []rune(got), tc.want, []rune(tc.want))
+			}
+		})
+	}
+	// The genuine-U+FFFD case in runes: it must stay one rune, not be
+	// re-replaced byte by byte into three.
+	if got := repairUTF8([]byte("\uFFFD")); len([]rune(got)) != 1 || got != fffd {
+		t.Errorf("repairUTF8(genuine U+FFFD) = %q, want exactly %q", got, fffd)
+	}
+}
+
 // runGit runs git with dir as CWD, failing the test on non-zero exit.
 func runGit(t *testing.T, dir string, args ...string) {
 	t.Helper()

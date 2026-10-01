@@ -645,6 +645,36 @@ func TestGitCRLF(t *testing.T) {
 	}
 }
 
+// TestGitNonUTF8: invalid UTF-8 committed to the fixture is repaired on
+// the git path, too — the same shared repairUTF8 as the local source:
+// one U+FFFD per bad byte, the file is ingested, not skipped (T9 edge
+// case: non-UTF-8).
+func TestGitNonUTF8(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git not on PATH (a runtime dependency, docs/PLAN.md §12)")
+	}
+
+	root := t.TempDir()
+	runGit(t, root, "init", "-q", "-b", "main", ".")
+	// Valid prefix, two invalid bytes (0xFF 0xFE), valid suffix.
+	writeTree(t, root, map[string]string{"broken/bad.md": "# Bad\n\xff\xfe end\n"})
+	runGit(t, root, "add", "broken/bad.md")
+	runGit(t, root, "-c", "user.name=test", "-c", "user.email=test@example.com",
+		"commit", "-q", "-m", "non-utf8 file")
+
+	res, err := Git(root, GitOptions{Branch: "main"}, discard())
+	if err != nil {
+		t.Fatalf("Git: %v", err)
+	}
+	files := wantPaths(t, res.Files, "broken/bad.md")
+	if want := "# Bad\n\uFFFD\uFFFD end\n"; files[0].Content != want {
+		t.Errorf("Content = %q, want %q", files[0].Content, want)
+	}
+	if res.Skipped != 0 {
+		t.Errorf("Skipped = %d, want 0 (repaired, not binary)", res.Skipped)
+	}
+}
+
 // authServer is a minimal git-over-http endpoint: the first request
 // (no credentials) gets a 401 challenge; a request that presents
 // credentials gets a 404, so the clone fails deterministically and
