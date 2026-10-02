@@ -4,6 +4,8 @@ Condensed from the official docs (fetched 2026-09-30):
 
 - Guide: <https://docs.onyx.app/developers/guides/index_files_ingestion_api>
 - Core concepts (DocumentBase / enums): <https://docs.onyx.app/developers/core_concepts>
+- API reference index: <https://docs.onyx.app/developers/api_reference>
+  (source of the "Other endpoints" section below, fetched 2026-10-02)
 
 ---
 
@@ -122,6 +124,44 @@ print(r.status_code, r.text)
 
 ---
 
+## Other endpoints (fetched 2026-10-02 — used by `sard check`, PLAN.md §13)
+
+The API reference has grown since the section above; the endpoints below
+matter to Sardonyx:
+
+- **`GET {API_BASE_URL}/health`** — **no authentication required.** Returns
+  `{"success": true, "message": "…", "data": null}` on a healthy deployment.
+  Reachability probe. <https://docs.onyx.app/developers/api_reference/miscellaneous/healthcheck>
+- **`GET {API_BASE_URL}/onyx-api/ingestion`** — "Get Ingestion Docs": the
+  read-only sibling of the `POST` above. Same Bearer auth and the same
+  `manage:connectors` / `admin` permission requirement. Returns an array of
+  `{"document_id", "semantic_id", "link"}` for the documents the key can
+  see. A `200` with the configured key proves the key is valid *for
+  ingestion* without creating, updating, or deleting anything — the
+  credential check `sard check` relies on.
+  <https://docs.onyx.app/developers/api_reference/ingestion/get_ingestion_docs>
+- **`GET {API_BASE_URL}/manage/admin/cc-pair/{cc_pair_id}`** — "Get CC Pair
+  Full Info": Bearer auth; `read:connectors` (included in `manage:connectors`
+  and in Manage Groups; admin has it), a Group Manager limited to pairs in
+  the groups they manage. Returns the pair's name, status,
+  `num_docs_indexed`, and connector/credential snapshots — enough to verify
+  that a configured `cc_pair_id` actually exists on the deployment (the
+  Ingestion `POST` does **not** validate that: a bogus id is accepted, and
+  the documents simply never appear on the Connectors page).
+  <https://docs.onyx.app/developers/api_reference/files_connectors/get_cc_pair_full_info>
+- **A delete operation** ("Delete Ingestion Doc") now appears in the
+  reference: the v1 premise that the Ingestion API has no delete endpoint
+  (the Implications table below; PLAN.md §11 #1) is likely out of date.
+  Verify the operation's auth and semantics before any v2 deletion/prune
+  work; `sard check` does not depend on it.
+  <https://docs.onyx.app/developers/api_reference/ingestion/delete_ingestion_doc>
+
+Schema drift note: in the current OpenAPI the request body's `cc_pair_id`
+is `integer | null` (nullable); a document still needs a valid pair to show
+up on the Connectors page, but the API itself accepts `null`.
+
+---
+
 ## Implications for `Sardonyx`
 
 | Concern | How we handle it |
@@ -133,4 +173,4 @@ print(r.status_code, r.text)
 | `sections[0].link` | GitHub blob URL when a public GitHub URL was the input, else null |
 | `metadata` | repo, path, commit sha, `ingested_by` |
 | `chunk_count`, owners, images | omitted in v1 |
-| Deletion of removed files | **not supported** by this API → documented as a limitation |
+| Deletion of removed files | **not supported by the v1 notes** → documented as a limitation. ⚠️ The current reference lists a delete operation — see "Other endpoints" above; the v1 stance stands, flagged for verification in v2 |
