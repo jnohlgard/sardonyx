@@ -1,5 +1,5 @@
 <div align="center">
-  <img alt="Sardonyx logo" src="assets/sardonyx-logo-nodule.svg" height="150" />
+  <img alt="Sardonyx logo" src="assets/sardonyx-logo-nodule.svg" height="200" />
   <h1 align="center">Sardonyx</h1>
   <p>
     Ingest Markdown files from a git repository URL or a local directory
