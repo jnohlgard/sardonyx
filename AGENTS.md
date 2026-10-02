@@ -30,6 +30,9 @@ git repo URL or a local directory into Onyx via the Ingestion API.
   `go.mod`; do not add other dependencies without discussion. Tests via
   `go test` (`net/http/httptest` for HTTP mocking).
 - Config precedence: CLI flag > env var > `.env`; `.env` is never committed.
+- Licensed AGPL-3.0 (full text in `LICENSE`). Every `.go` file starts with the
+  two-line header `// Copyright (C) 2026 Joakim Nohlgård` +
+  `// SPDX-License-Identifier: AGPL-3.0` — copy it into any new `.go` file.
 - Never log or echo the Onyx API key or git token.
 
 ## Git
