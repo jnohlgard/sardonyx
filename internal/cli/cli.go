@@ -3,11 +3,14 @@
 
 // Package cli wires sard's pipeline together: command-line parsing,
 // config resolution, source discovery, transform, ingestion, and the
-// final summary (docs/PLAN.md §3, §4; task T7).
+// final summary (docs/PLAN.md §3, §4; task T7) — plus the `sard check`
+// pre-flight subcommand (docs/PLAN.md §13; task T11b), which verifies
+// the environment a real run needs without creating any document.
 //
 // Run is the single entry point used by cmd/sard. It builds the cobra
-// command tree — the root `sard` command and the `ingest` subcommand,
-// "sard ingest <source> [options]" — and executes it. The flag
+// command tree — the root `sard` command and the `ingest` and `check`
+// subcommands, "sard ingest <source> [options]" and "sard check
+// [options]" — and executes it. The flag
 // definitions on the ingest command are the single source of truth for
 // the --help output: cobra renders the usage line and the option list
 // from the same definitions that bind the parsed values, so the two
@@ -24,7 +27,11 @@
 // (config.Resolve), classifies the input (an existing local directory →
 // source.Local, anything else → source.Git), and runs discovery →
 // transform → ingest sequentially under signal.NotifyContext so Ctrl-C
-// aborts promptly.
+// aborts promptly. The check command's RunE (runCheck) does the same
+// pre-flight — build logger, validate the flags, resolve configuration
+// with DryRun: false (exactly the required-credentials set of a real
+// run; that is the point of the command) — and then runs
+// onyx.Client.Check under signal.NotifyContext (docs/PLAN.md §13.6).
 //
 // --help prints the auto-generated usage to stdout and exits 0 (cobra's
 // convention); the root's --version flag prints the build-stamped
@@ -55,6 +62,26 @@
 //     Missing Onyx credentials are a configuration error for a real run
 //     only; a dry run sends nothing and needs none.
 //   - 130 — the run was interrupted (SIGINT via signal.NotifyContext).
+//
+// sard check (docs/PLAN.md §13) maps its own exit codes:
+//
+//   - 0 — the server is reachable, the key was accepted (probe 2 or
+//     the 2f fallback), and the cc-pair was validated — or, where the
+//     best-effort cc-pair probe could not run, that was reported as a
+//     warning.
+//   - 1 — the server is unreachable (a connection failure/timeout —
+//     probe 1, or probes 2/2f after retries) or a persistent 429/5xx.
+//   - 2 — the same configuration pre-flight as a real run (missing or
+//     invalid ONYX_API_KEY / ONYX_CC_PAIR_ID, a negative --cc-pair-id,
+//     an invalid --log-level) — or a rejected key (401/403) — or the
+//     configured cc-pair-id not present on the deployment (probe 3,
+//     404) — or no Onyx Ingestion API at the configured URL (2f, other
+//     4xx).
+//   - 130 — interrupted (Ctrl-C).
+//
+// Like ingest, check prints everything to stderr — one line per probe,
+// then a summary header on success, or a single actionable error line
+// on failure — and stdout stays empty.
 //
 // --dry-run never exits 1 (it sends nothing, so no file can fail); a
 // discovery error in dry-run still exits 2. A dry run needs no Onyx
@@ -231,6 +258,105 @@ Additional help topics:{{range .Commands}}{{if .IsAdditionalHelpTopicCommand}}
 Use "{{.CommandPath}} [command] --help" for more information about a command.{{end}}
 `
 
+// checkFlags holds the parsed state of one `sard check` invocation
+// (docs/PLAN.md §13.1). It is separate from ingestFlags on purpose:
+// check has no source, git, include/exclude, depth/size, --limit,
+// --dry-run, or --id-base flags — discovery is out of scope for
+// check, and git concerns do not apply.
+type checkFlags struct {
+	apiURL   string
+	apiKey   string
+	ccPairID int
+	logLevel string
+}
+
+// checkUsageTemplate is ingestUsageTemplate minus the Arguments
+// section (check takes no positional arguments), with an Environment
+// section listing exactly the three Onyx variables behind its flags —
+// no GIT_TOKEN or SARD_ID_BASE, since check has no git or ID-base
+// flags. TestCheckUsageTemplateEnvNames guards the names. It is set
+// explicitly on the check command because a command inherits its
+// parent's usage template (the root uses rootUsageTemplate, without a
+// UseLine); keep the default part in sync with the cobra version
+// pinned in go.mod.
+const checkUsageTemplate = `Usage:{{if .Runnable}}
+  {{.UseLine}}
+
+Environment:
+  ONYX_API_URL     Onyx API base URL (--api-url)
+  ONYX_API_KEY     Onyx API key (--api-key)
+  ONYX_CC_PAIR_ID  connector-credential pair id (--cc-pair-id){{end}}{{if .HasAvailableSubCommands}}
+  {{.CommandPath}} [command]{{end}}{{if gt (len .Aliases) 0}}
+
+Aliases:
+  {{.NameAndAliases}}{{end}}{{if .HasExample}}
+
+Examples:
+{{.Example}}{{end}}{{if .HasAvailableSubCommands}}{{$cmds := .Commands}}{{if eq (len .Groups) 0}}
+
+Available Commands:{{range $cmds}}{{if (or .IsAvailableCommand (eq .Name "help"))}}
+  {{rpad .Name .NamePadding }} {{.Short}}{{end}}{{end}}{{else}}{{range $group := .Groups}}
+
+{{.Title}}{{range $cmds}}{{if (and (eq .GroupID $group.ID) (or .IsAvailableCommand (eq .Name "help")))}}
+  {{rpad .Name .NamePadding }} {{.Short}}{{end}}{{end}}{{end}}{{if not .AllChildCommandsHaveGroup}}
+
+Additional Commands:{{range $cmds}}{{if (and (eq .GroupID "") (or .IsAvailableCommand (eq .Name "help")))}}
+  {{rpad .Name .NamePadding }} {{.Short}}{{end}}{{end}}{{end}}{{end}}{{end}}{{if .HasAvailableLocalFlags}}
+
+Flags:
+{{.LocalFlags.FlagUsages | trimTrailingWhitespaces}}{{end}}{{if .HasAvailableInheritedFlags}}
+
+Global Flags:
+{{.InheritedFlags.FlagUsages | trimTrailingWhitespaces}}{{end}}{{if .HasHelpSubCommands}}
+
+Additional help topics:{{range .Commands}}{{if .IsAdditionalHelpTopicCommand}}
+  {{rpad .CommandPath .CommandPathPadding}} {{.Short}}{{end}}{{end}}{{end}}{{if .HasAvailableSubCommands}}
+
+Use "{{.CommandPath}} [command] --help" for more information about a command.{{end}}
+`
+
+// newCheckCmd builds the `sard check` subcommand (docs/PLAN.md §13):
+// the four Onyx-side flags bound to p and a RunE wired to runCheck.
+// The flag definitions are the single source of truth for the --help
+// output, exactly as for ingest: cobra renders the usage line and the
+// option list from the same definitions that bind the parsed values.
+// The Long text is a summary; there is no Arguments section because
+// check takes no positional argument (cobra.NoArgs).
+func newCheckCmd(p *checkFlags) *cobra.Command {
+	cmd := &cobra.Command{
+		Use:   "check",
+		Short: "Verify the Onyx environment without creating any document",
+		Long: `Verifies the environment a real run needs — the Onyx server at
+ONYX_API_URL answers, the API key is accepted with the
+Ingestion API's permission requirement (manage:connectors or
+admin), and the configured cc-pair id exists on the deployment
+(best-effort) — without creating, updating, or deleting any
+document.
+
+It is the pre-flight for the first sard ingest: after setting up
+your credentials, run it once; when it exits 0, the run cannot
+fail on an environmental problem. Exit codes: 0 verified; 1
+server unreachable; 2 configuration, credentials, or cc-pair
+problem; 130 interrupted.`,
+		Args:          cobra.NoArgs,
+		SilenceErrors: true,
+		SilenceUsage:  true,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			if code := runCheck(p); code != 0 {
+				return exitCode(code)
+			}
+			return nil
+		},
+	}
+	cmd.SetUsageTemplate(checkUsageTemplate)
+	f := cmd.Flags()
+	f.StringVar(&p.apiURL, "api-url", "", "Onyx API base URL (default: "+config.DefaultAPIURL+"; env: "+config.EnvAPIURL+")")
+	f.StringVar(&p.apiKey, "api-key", "", "Onyx API key (env: "+config.EnvAPIKey+")")
+	f.IntVar(&p.ccPairID, "cc-pair-id", 0, "Onyx connector-credential-pair id (env: "+config.EnvCCPairID+")")
+	f.StringVar(&p.logLevel, "log-level", "info", "log level: debug | info | warning | error")
+	return cmd
+}
+
 // Version is the running binary's version, printed by the root
 // command's --version flag (`sard version <Version>` on stdout, exit
 // 0). cmd/sard assigns it from the build-time main.version stamp
@@ -254,7 +380,13 @@ the Onyx Ingestion API, so the documentation becomes part of Onyx's
 knowledge base — searchable and usable by its AI features. It is a
 one-shot sync: run it whenever your docs change. Re-running is safe;
 document IDs are deterministic, so a second run updates existing
-documents instead of duplicating them.`,
+documents instead of duplicating them.
+
+sard check is the pre-flight for the first real run: it verifies the
+Onyx environment (server reachability, the API key's ingestion
+permission, and the configured cc-pair's existence) without creating,
+updating, or deleting any document — when it exits 0, the run cannot
+fail on an environmental problem.`,
 		SilenceErrors: true,
 		SilenceUsage:  true,
 		RunE:          func(cmd *cobra.Command, args []string) error { return errNoSubcommand },
@@ -474,17 +606,19 @@ func discover(src string, p *ingestFlags, settings *config.Settings, log *slog.L
 
 // Run executes one `sard` invocation and returns the exit code per
 // docs/PLAN.md §8 (see the package doc). It builds the cobra command
-// tree (root `sard` + the `ingest` subcommand), executes it, and maps
-// the outcome: --help (and the built-in help command) printed usage and
-// exit 0; the pipeline's own exit code (0/1/2/130, all diagnostics
-// logged by the pipeline itself); a missing or unknown subcommand, and
-// any flag/argument error on `sard ingest`, exit 2 with the relevant
-// usage on stderr (the auto-generated top-level usage for root-level
-// problems, the ingest usage for ingest-level ones). cmd/sard only maps
-// the returned code to os.Exit.
+// tree (root `sard` + the `ingest` and `check` subcommands), executes
+// it, and maps the outcome: --help (and the built-in help command)
+// printed usage and exit 0; the pipeline's own exit code (0/1/2/130,
+// all diagnostics logged by the pipeline itself); a missing or unknown
+// subcommand, and any flag/argument error on `sard ingest` or
+// `sard check`, exit 2 with the relevant usage on stderr (the
+// auto-generated top-level usage for root-level problems, the
+// subcommand usage for subcommand-level ones). cmd/sard only maps the
+// returned code to os.Exit.
 func Run(args []string) int {
 	root := newRootCmd()
 	root.AddCommand(newIngestCmd(&ingestFlags{}))
+	root.AddCommand(newCheckCmd(&checkFlags{}))
 	root.SetArgs(args)
 
 	cmd, err := root.ExecuteC()
@@ -505,8 +639,9 @@ func Run(args []string) int {
 		fmt.Fprintln(os.Stderr, root.UsageString())
 		return 2
 	default:
-		// A flag or argument error on `sard ingest`: the standard
-		// diagnostic plus the full ingest usage, exit 2.
+		// A flag or argument error on `sard ingest` or
+		// `sard check`: the standard diagnostic plus the full
+		// subcommand usage, exit 2.
 		w := cmd.ErrOrStderr()
 		fmt.Fprintln(w, cmd.ErrPrefix(), err)
 		fmt.Fprintln(w, cmd.UsageString())
@@ -615,6 +750,106 @@ func runDry(ctx context.Context, files []models.IngestedFile, docSource string, 
 	log.Info(summaryHeader("dry run complete", elapsed, len(files),
 		fmt.Sprintf("printed %d %s, skipped %d", printed, plural(printed, "payload"), skipped)))
 	return 0
+}
+
+// runCheck runs the environment pre-flight for one `sard check`
+// invocation and returns the exit code per docs/PLAN.md §13.4 (see the
+// package doc): build the logger from --log-level, validate the flag
+// values (--cc-pair-id >= 0; 0 = unset, as in ingest), resolve
+// configuration exactly as a real run does (config.Resolve with
+// DryRun: false — the point of the command), run the three probes
+// under a signal-aware context, and print the report. A failed check
+// prints no summary header: a single actionable error line, then the
+// exit code (the same shape as the ingest auth fail-fast).
+func runCheck(p *checkFlags) int {
+	log, err := buildLogger(p.logLevel)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "error: %v\n", err)
+		return 2
+	}
+	if p.ccPairID < 0 {
+		log.Error(fmt.Sprintf("invalid --cc-pair-id %d (must be >= 0)", p.ccPairID))
+		return 2
+	}
+	settings, err := config.Resolve(config.Flags{
+		APIURL:   p.apiURL,
+		APIKey:   p.apiKey,
+		CCPairID: p.ccPairID,
+		DryRun:   false,
+	})
+	if err != nil {
+		log.Error(err.Error())
+		return 2
+	}
+
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
+	defer stop()
+
+	start := time.Now()
+	client := onyx.NewClient(settings.APIURL, settings.APIKey, settings.CCPairID)
+	res, err := client.Check(ctx)
+	if err != nil {
+		if ctx.Err() != nil {
+			log.Warn("check interrupted (Ctrl-C)")
+			return 130
+		}
+		log.Error(err.Error())
+		if errors.Is(err, onyx.ErrUnreachable) {
+			return 1
+		}
+		return 2 // ErrAuth, ErrNoIngestionAPI, or ErrCCPairNotFound
+	}
+
+	printCheckReport(res, settings, time.Since(start), log)
+	return 0
+}
+
+// printCheckReport renders the check's report (docs/PLAN.md §13.5):
+// one line per probe — all on stderr through the run's logger — then
+// the summary header. The happy line for each probe is info; a
+// degraded health, a key verified via the 2f fallback (with the §13.3
+// caveat, visible in the output), and an unvalidated cc-pair get a
+// warning, so the verdict can be read with its caveats.
+func printCheckReport(res onyx.CheckResult, settings *config.Settings, elapsed time.Duration, log *slog.Logger) {
+	if res.Healthy {
+		log.Info(fmt.Sprintf("Onyx at %s: health ok", settings.APIURL))
+	} else {
+		log.Warn(fmt.Sprintf("Onyx at %s: health check inconclusive (no 200 with success=true); continuing — the key probe doubles as the reachability test", settings.APIURL))
+	}
+
+	if res.UsedFallback {
+		log.Info("API key accepted via the POST fallback (the GET /onyx-api/ingestion endpoint is unavailable on this deployment)")
+		log.Warn("caveat: the key was verified with a deliberately-invalid body; a deployment that validates the body before auth could have misreported a bad key (docs/PLAN.md §13.3)")
+	} else {
+		log.Info(fmt.Sprintf("API key accepted — %d %s visible via the ingestion API", res.DocCount, plural(res.DocCount, "document")))
+	}
+
+	if cp := res.CCPair; cp != nil {
+		log.Info(ccPairLine(cp))
+	} else {
+		log.Warn(fmt.Sprintf("cc-pair %d not validated (best-effort probe); verify the id in the Admin Panel — a real run with a wrong id would fail silently", settings.CCPairID))
+	}
+
+	ccState := "cc-pair verified"
+	if res.CCPair == nil {
+		ccState = "cc-pair unverified (warning)"
+	}
+	log.Info(fmt.Sprintf("check complete: reachable, key ok, %s in %s", ccState, elapsed))
+}
+
+// ccPairLine renders the cc-pair probe's report line
+// (docs/PLAN.md §13.5): the id, the connector name and the pair's
+// status, and the number of indexed documents (an unknown field
+// reports as such rather than silently).
+func ccPairLine(cp *onyx.CCPairInfo) string {
+	name, status := cp.Name, cp.Status
+	if name == "" {
+		name = "(unnamed)"
+	}
+	if status == "" {
+		status = "(status unknown)"
+	}
+	return fmt.Sprintf("cc-pair %d: %s — %s, %d %s indexed", cp.ID, name, status, cp.Docs, plural(cp.Docs, "document"))
 }
 
 // summaryHeader renders the header line of the end-of-run summary

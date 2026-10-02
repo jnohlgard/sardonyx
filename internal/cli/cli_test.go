@@ -1,15 +1,16 @@
 // Copyright (C) 2026 Joakim Nohlgård
 // SPDX-License-Identifier: AGPL-3.0
 
-// End-to-end smoke tests for the CLI (docs/PLAN.md §10, T7). They invoke
-// Run — the same entry function cmd/sard uses — with a temp-dir fixture
-// and a mock Onyx server (net/http/httptest; stdlib only).
+// End-to-end smoke tests for the CLI (docs/PLAN.md §10, T7 and T11b).
+// They invoke Run — the same entry function cmd/sard uses — with a
+// temp-dir fixture and a mock Onyx server (net/http/httptest; stdlib only).
 package cli
 
 import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -70,9 +71,16 @@ func lineContaining(s, needle string) string {
 
 // assertElapsed checks that a summary line carries a well-formed
 // "in <duration>" field: the tests assert presence and shape, never
-// the exact wall-clock value (docs/PLAN.md §10 T8).
+// the exact wall-clock value (docs/PLAN.md §10 T8). The line is a
+// slog TextHandler record: the msg value is wrapped in double
+// quotes, and when the duration is the message's last field the
+// closing quote follows it directly — so the msg is unwrapped
+// before the field is extracted.
 func assertElapsed(t *testing.T, line string) {
 	t.Helper()
+	if _, msg, ok := strings.Cut(line, `msg="`); ok {
+		line = strings.TrimSuffix(msg, `"`)
+	}
 	_, rest, ok := strings.Cut(line, " in ")
 	if !ok {
 		t.Fatalf("no elapsed field in summary line %q", line)
@@ -908,5 +916,495 @@ func TestIngestUsageTemplateEnvNames(t *testing.T) {
 		if !strings.Contains(ingestUsageTemplate, name) {
 			t.Errorf("Environment section of ingestUsageTemplate is missing %s", name)
 		}
+	}
+}
+
+// mockCheck is a mock of the three endpoints sard check probes
+// (GET /health, GET/POST /onyx-api/ingestion, GET /manage/admin/
+// cc-pair/{id}). It records every request — method, path, body, and
+// auth — so the tests can assert the probe sequence and that no
+// document-shaped POST ever reaches the server.
+type mockCheck struct {
+	ts       *httptest.Server
+	mu       sync.Mutex
+	requests []checkRequest
+	respond  func(method, path string, n int) (code int, body string)
+}
+
+// checkRequest is one request as seen by mockCheck.
+type checkRequest struct {
+	Method string
+	Path   string
+	Body   []byte
+	Auth   string
+}
+
+func newMockCheck(t *testing.T, respond func(method, path string, n int) (int, string)) *mockCheck {
+	t.Helper()
+	m := &mockCheck{respond: respond}
+	m.ts = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
+
+		m.mu.Lock()
+		m.requests = append(m.requests, checkRequest{r.Method, r.URL.Path, body, r.Header.Get("Authorization")})
+		n := 0
+		for _, req := range m.requests {
+			if req.Method == r.Method && req.Path == r.URL.Path {
+				n++
+			}
+		}
+		m.mu.Unlock()
+
+		code, resp := m.respond(r.Method, r.URL.Path, n)
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(code)
+		fmt.Fprint(w, resp)
+	}))
+	t.Cleanup(m.ts.Close)
+	return m
+}
+
+func (m *mockCheck) all() []checkRequest {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return append([]checkRequest(nil), m.requests...)
+}
+
+func (m *mockCheck) count(method, path string) int {
+	n := 0
+	for _, r := range m.all() {
+		if r.Method == method && r.Path == path {
+			n++
+		}
+	}
+	return n
+}
+
+// anyDocumentPost reports whether any POST carried a document-shaped
+// body (an id or sections) — the hard invariant of sard check: no
+// document is ever created, updated, or deleted. The 2f fallback body
+// is exactly {} and has none of those fields.
+func (m *mockCheck) anyDocumentPost() bool {
+	for _, r := range m.all() {
+		if r.Method != http.MethodPost {
+			continue
+		}
+		var p models.OnyxPayload
+		if json.Unmarshal(r.Body, &p) == nil &&
+			(p.Document.ID != "" || len(p.Document.Sections) > 0 || p.Document.SemanticIdentifier != "") {
+			return true
+		}
+	}
+	return false
+}
+
+// checkHappyServer serves all three check endpoints healthily for
+// cc-pair id 7.
+func checkHappyServer(t *testing.T) *mockCheck {
+	t.Helper()
+	return newMockCheck(t, func(method, path string, n int) (int, string) {
+		switch {
+		case method == http.MethodGet && path == "/health":
+			return 200, `{"success":true,"message":"ok","data":null}`
+		case method == http.MethodGet && path == "/onyx-api/ingestion":
+			return 200, `[{"document_id":"d1","semantic_id":"a.md","link":null},{"document_id":"d2","semantic_id":"b.md","link":null}]`
+		case method == http.MethodGet && path == "/manage/admin/cc-pair/7":
+			return 200, `{"success":true,"data":{"name":"My Docs","status":"ACTIVE","num_docs_indexed":12}}`
+		}
+		return 404, `{"detail":"not found"}`
+	})
+}
+
+// TestRunCheckHappy: a healthy environment exits 0 — the report lines
+// (one per probe, then the summary header) go to stderr, stdout stays
+// empty, exactly one request is made per probe (GET only; the Bearer
+// header is on probes 2 and 3, not on health), and the server never
+// received a document-shaped POST (docs/PLAN.md §13.4, §13.5).
+func TestRunCheckHappy(t *testing.T) {
+	setEnv(t, "test-check-key", "7", "")
+	mock := checkHappyServer(t)
+
+	code, out, stderr := runSard(t, "check", "--api-url", mock.ts.URL, "--log-level", "info")
+	if code != 0 {
+		t.Fatalf("exit = %d, want 0; stderr:\n%s", code, stderr)
+	}
+	if len(out) != 0 {
+		t.Fatalf("stdout is not empty (check prints no JSON): %q", out)
+	}
+	if got := mock.count(http.MethodGet, "/health"); got != 1 {
+		t.Errorf("GET /health requests = %d, want 1", got)
+	}
+	if got := mock.count(http.MethodGet, "/onyx-api/ingestion"); got != 1 {
+		t.Errorf("GET /onyx-api/ingestion requests = %d, want 1", got)
+	}
+	if got := mock.count(http.MethodGet, "/manage/admin/cc-pair/7"); got != 1 {
+		t.Errorf("GET cc-pair requests = %d, want 1", got)
+	}
+	if got := mock.count(http.MethodPost, "/onyx-api/ingestion"); got != 0 {
+		t.Errorf("POST /onyx-api/ingestion requests = %d, want 0 (a modern deployment)", got)
+	}
+	if mock.anyDocumentPost() {
+		t.Fatal("a document-shaped POST reached the server")
+	}
+	for _, r := range mock.all() {
+		if r.Path == "/health" && r.Auth != "" {
+			t.Errorf("health probe carries Authorization %q, want none", r.Auth)
+		}
+		if r.Path != "/health" && r.Auth != "Bearer test-check-key" {
+			t.Errorf("%s %s Authorization = %q, want Bearer test-check-key", r.Method, r.Path, r.Auth)
+		}
+	}
+
+	stderrS := string(stderr)
+	for _, want := range []string{
+		"health ok",
+		"API key accepted — 2 documents visible via the ingestion API",
+		"cc-pair 7: My Docs — ACTIVE, 12 documents indexed",
+		"check complete: reachable, key ok, cc-pair verified in",
+	} {
+		if line := lineContaining(stderrS, want); line == "" {
+			t.Errorf("no report line %q; stderr:\n%s", want, stderrS)
+		}
+	}
+	header := lineContaining(stderrS, "check complete: reachable, key ok, cc-pair verified in")
+	assertElapsed(t, header)
+}
+
+// TestRunCheckFailures: every exit-2 case of sard check
+// (docs/PLAN.md §13.4): missing API key, missing cc-pair id, a
+// negative --cc-pair-id, an invalid --log-level, a 401, a 403 (via the
+// 2f disambiguation), a cc-pair 404 (the message names the configured
+// id, never the key), and a URL with no Ingestion API at all.
+func TestRunCheckFailures(t *testing.T) {
+	t.Run("missing API key", func(t *testing.T) {
+		setEnv(t, "", "7", "")
+		mock := checkHappyServer(t)
+		code, _, stderr := runSard(t, "check", "--api-url", mock.ts.URL, "--log-level", "info")
+		if code != 2 {
+			t.Fatalf("exit = %d, want 2; stderr:\n%s", code, stderr)
+		}
+		if got := len(mock.all()); got != 0 {
+			t.Errorf("%d requests, want 0 (a pre-flight error probes nothing)", got)
+		}
+		if line := lineContaining(string(stderr), "ONYX_API_KEY is required"); line == "" {
+			t.Fatalf("no actionable error line; stderr:\n%s", stderr)
+		}
+	})
+	t.Run("missing cc-pair id", func(t *testing.T) {
+		setEnv(t, "test-check-key", "", "")
+		mock := checkHappyServer(t)
+		code, _, stderr := runSard(t, "check", "--api-url", mock.ts.URL, "--log-level", "info")
+		if code != 2 {
+			t.Fatalf("exit = %d, want 2; stderr:\n%s", code, stderr)
+		}
+		if got := len(mock.all()); got != 0 {
+			t.Errorf("%d requests, want 0 (a pre-flight error probes nothing)", got)
+		}
+		if line := lineContaining(string(stderr), "ONYX_CC_PAIR_ID is required"); line == "" {
+			t.Fatalf("no actionable error line; stderr:\n%s", stderr)
+		}
+	})
+	t.Run("negative cc-pair-id", func(t *testing.T) {
+		setEnv(t, "test-check-key", "7", "")
+		mock := checkHappyServer(t)
+		code, _, stderr := runSard(t, "check", "--api-url", mock.ts.URL, "--cc-pair-id", "-1", "--log-level", "info")
+		if code != 2 {
+			t.Fatalf("exit = %d, want 2; stderr:\n%s", code, stderr)
+		}
+		if got := len(mock.all()); got != 0 {
+			t.Errorf("%d requests, want 0 (a bad flag value probes nothing)", got)
+		}
+		if line := lineContaining(string(stderr), "invalid --cc-pair-id -1"); line == "" {
+			t.Fatalf("no actionable error line; stderr:\n%s", stderr)
+		}
+	})
+	t.Run("invalid log-level", func(t *testing.T) {
+		setEnv(t, "test-check-key", "7", "")
+		code, _, stderr := runSard(t, "check", "--log-level", "loud")
+		if code != 2 {
+			t.Fatalf("exit = %d, want 2; stderr:\n%s", code, stderr)
+		}
+		if line := lineContaining(string(stderr), "invalid --log-level"); line == "" {
+			t.Fatalf("no actionable error line; stderr:\n%s", stderr)
+		}
+	})
+	t.Run("401", func(t *testing.T) {
+		setEnv(t, "test-check-key", "7", "")
+		mock := newMockCheck(t, func(method, path string, n int) (int, string) {
+			if path == "/health" {
+				return 200, `{"success":true}`
+			}
+			return 401, `{"detail":"invalid token"}`
+		})
+		code, _, stderr := runSard(t, "check", "--api-url", mock.ts.URL, "--log-level", "info")
+		if code != 2 {
+			t.Fatalf("exit = %d, want 2; stderr:\n%s", code, stderr)
+		}
+		if got := mock.count(http.MethodGet, "/onyx-api/ingestion"); got != 1 {
+			t.Errorf("GET ingestion requests = %d, want 1 (a 401 is not retried)", got)
+		}
+		if got := mock.count(http.MethodGet, "/manage/admin/cc-pair/7"); got != 0 {
+			t.Errorf("cc-pair requests = %d, want 0 (no further probes)", got)
+		}
+		stderrS := string(stderr)
+		for _, want := range []string{"ONYX_API_KEY", "manage:connectors"} {
+			if !strings.Contains(stderrS, want) {
+				t.Errorf("error line does not mention %q; stderr:\n%s", want, stderrS)
+			}
+		}
+	})
+	t.Run("403 via fallback", func(t *testing.T) {
+		setEnv(t, "test-check-key", "7", "")
+		mock := newMockCheck(t, func(method, path string, n int) (int, string) {
+			if path == "/health" {
+				return 200, `{"success":true}`
+			}
+			if path == "/onyx-api/ingestion" {
+				return 403, `{"detail":"forbidden"}`
+			}
+			return 404, `{}`
+		})
+		code, _, stderr := runSard(t, "check", "--api-url", mock.ts.URL, "--log-level", "info")
+		if code != 2 {
+			t.Fatalf("exit = %d, want 2; stderr:\n%s", code, stderr)
+		}
+		// The 2f disambiguation ran, with the byte-exact {} body.
+		var post bool
+		for _, r := range mock.all() {
+			if r.Method == http.MethodPost && r.Path == "/onyx-api/ingestion" {
+				post = true
+				if string(r.Body) != "{}" {
+					t.Fatalf("2f body = %q, want byte-exact {}", r.Body)
+				}
+			}
+		}
+		if !post {
+			t.Fatal("the 2f POST fallback did not run")
+		}
+	})
+	t.Run("cc-pair 404", func(t *testing.T) {
+		const key = "super-secret-check-key-98765"
+		setEnv(t, key, "7", "")
+		mock := newMockCheck(t, func(method, path string, n int) (int, string) {
+			if path == "/health" {
+				return 200, `{"success":true}`
+			}
+			if method == http.MethodGet && path == "/onyx-api/ingestion" {
+				return 200, `[{"document_id":"d1"}]`
+			}
+			if path == "/manage/admin/cc-pair/7" {
+				return 404, `{"detail":"not found"}`
+			}
+			return 404, `{}`
+		})
+		code, _, stderr := runSard(t, "check", "--api-url", mock.ts.URL, "--log-level", "info")
+		if code != 2 {
+			t.Fatalf("exit = %d, want 2; stderr:\n%s", code, stderr)
+		}
+		stderrS := string(stderr)
+		if line := lineContaining(stderrS, "cc-pair-id 7 not found"); line == "" {
+			t.Fatalf("no line naming the configured id; stderr:\n%s", stderrS)
+		}
+		if strings.Contains(stderrS, key) {
+			t.Fatalf("the API key leaked into the output; stderr:\n%s", stderrS)
+		}
+	})
+	t.Run("no ingestion API at this URL", func(t *testing.T) {
+		setEnv(t, "test-check-key", "7", "")
+		mock := newMockCheck(t, func(method, path string, n int) (int, string) {
+			if path == "/health" {
+				return 200, `{"success":true}`
+			}
+			return 404, `{"detail":"not found"}`
+		})
+		code, _, stderr := runSard(t, "check", "--api-url", mock.ts.URL, "--log-level", "info")
+		if code != 2 {
+			t.Fatalf("exit = %d, want 2; stderr:\n%s", code, stderr)
+		}
+		stderrS := string(stderr)
+		for _, want := range []string{"no Onyx Ingestion API at", "ONYX_API_URL"} {
+			if !strings.Contains(stderrS, want) {
+				t.Errorf("error line does not mention %q; stderr:\n%s", want, stderrS)
+			}
+		}
+	})
+}
+
+// TestRunCheckUnreachable: a dead port is a connection failure on
+// probe 1 (a single un-retried attempt) → exit 1
+// (docs/PLAN.md §13.4).
+func TestRunCheckUnreachable(t *testing.T) {
+	setEnv(t, "test-check-key", "7", "")
+	l, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	addr := l.Addr().String()
+	_ = l.Close() // port now refuses connections
+
+	code, _, stderr := runSard(t, "check", "--api-url", "http://"+addr, "--log-level", "info")
+	if code != 1 {
+		t.Fatalf("exit = %d, want 1; stderr:\n%s", code, stderr)
+	}
+	if line := lineContaining(string(stderr), "unreachable"); line == "" {
+		t.Fatalf("no unreachable error line; stderr:\n%s", stderr)
+	}
+}
+
+// TestRunCheckInterrupted: SIGINT mid-check (a /health request held
+// open) cancels the check → exit 130 (docs/PLAN.md §13.4).
+func TestRunCheckInterrupted(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("SIGINT semantics differ on Windows")
+	}
+	setEnv(t, "test-check-key", "7", "")
+	release := make(chan struct{})
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		select {
+		case <-release:
+			return
+		case <-r.Context().Done():
+			return
+		case <-time.After(30 * time.Second): // safety net: never hang a test
+			w.WriteHeader(200)
+			fmt.Fprint(w, `{"success":true}`)
+		}
+	}))
+	defer func() {
+		close(release)
+		ts.Close()
+	}()
+
+	time.AfterFunc(300*time.Millisecond, func() {
+		_ = syscall.Kill(os.Getpid(), syscall.SIGINT)
+	})
+
+	code, _, stderr := runSard(t, "check", "--api-url", ts.URL, "--log-level", "info")
+	if code != 130 {
+		t.Fatalf("exit = %d, want 130; stderr:\n%s", code, stderr)
+	}
+}
+
+// TestRunCheckHelp: sard check --help exits 0 with exactly four flags
+// (api-url, api-key, cc-pair-id, log-level — no source/git/limit/
+// dry-run/id-base flags) and an Environment section naming exactly the
+// three Onyx variables (docs/PLAN.md §13.1).
+func TestRunCheckHelp(t *testing.T) {
+	setEnv(t, "", "", "")
+	code, out, errOut := runSard(t, "check", "--help")
+	if code != 0 {
+		t.Fatalf("exit = %d, want 0; stderr: %s", code, errOut)
+	}
+	if len(errOut) != 0 {
+		t.Fatalf("stderr is not empty: %q", errOut)
+	}
+	s := string(out)
+
+	// The Flags section (between "Flags:" and the next section or end;
+	// check's help ends with Flags, so the after-part is the section).
+	_, flagsSection, ok := strings.Cut(s, "\nFlags:\n")
+	if !ok {
+		t.Fatalf("no Flags section in the help output:\n%s", s)
+	}
+	var flagLines []string
+	for line := range strings.SplitSeq(flagsSection, "\n") {
+		if strings.HasPrefix(line, "      --") { // long flags only ("-h, --help" is the cobra built-in)
+			flagLines = append(flagLines, line)
+		}
+	}
+	if len(flagLines) != 4 {
+		t.Fatalf("the Flags section has %d long flags, want 4:\n%s", len(flagLines), flagsSection)
+	}
+	for _, want := range []string{"--api-url", "--api-key", "--cc-pair-id", "--log-level"} {
+		if !strings.Contains(flagsSection, want) {
+			t.Errorf("the Flags section is missing %s:\n%s", want, flagsSection)
+		}
+	}
+	for _, absent := range []string{"--source", "--branch", "--token", "--include", "--exclude", "--max-depth", "--max-file-size", "--limit", "--dry-run", "--id-base"} {
+		if strings.Contains(s, absent) {
+			t.Errorf("the help output mentions %s (check has no source/git/limit/dry-run/id-base flags)", absent)
+		}
+	}
+
+	// The Environment section names exactly the three Onyx variables.
+	// It sits between "Environment:" and the next section, so cut the
+	// after-part at the first blank line.
+	_, envSection, ok := strings.Cut(s, "\nEnvironment:\n")
+	if !ok {
+		t.Fatalf("no Environment section in the help output:\n%s", s)
+	}
+	if before, _, found := strings.Cut(envSection, "\n\n"); found {
+		envSection = before
+	}
+	var envLines []string
+	for line := range strings.SplitSeq(envSection, "\n") {
+		if strings.TrimSpace(line) != "" {
+			envLines = append(envLines, line)
+		}
+	}
+	if len(envLines) != 3 {
+		t.Fatalf("the Environment section has %d lines, want 3:\n%s", len(envLines), envSection)
+	}
+	for _, want := range []string{config.EnvAPIURL, config.EnvAPIKey, config.EnvCCPairID} {
+		if !strings.Contains(envSection, want) {
+			t.Errorf("the Environment section is missing %s:\n%s", want, envSection)
+		}
+	}
+	for _, absent := range []string{config.EnvGitToken, config.EnvIDBase} {
+		if strings.Contains(envSection, absent) {
+			t.Errorf("the Environment section must not name %s (check has no git or ID-base flags):\n%s", absent, envSection)
+		}
+	}
+}
+
+// TestCheckUsageTemplateEnvNames guards the static Environment section
+// of checkUsageTemplate against drift, mirroring
+// TestIngestUsageTemplateEnvNames: it lists exactly the three Onyx
+// variables — each name defined in internal/config that check has a
+// flag for must appear, and the git/ID-base names must not.
+func TestCheckUsageTemplateEnvNames(t *testing.T) {
+	for _, name := range []string{
+		config.EnvAPIURL,
+		config.EnvAPIKey,
+		config.EnvCCPairID,
+	} {
+		if !strings.Contains(checkUsageTemplate, name) {
+			t.Errorf("Environment section of checkUsageTemplate is missing %s", name)
+		}
+	}
+	for _, name := range []string{
+		config.EnvGitToken,
+		config.EnvIDBase,
+	} {
+		if strings.Contains(checkUsageTemplate, name) {
+			t.Errorf("checkUsageTemplate must not name %s (check has no git or ID-base flags)", name)
+		}
+	}
+}
+
+// TestRootUsageListsSubcommands: the auto-generated top-level usage
+// (printed for a missing or unknown subcommand) lists both subcommands.
+func TestRootUsageListsSubcommands(t *testing.T) {
+	for _, args := range [][]string{{}, {"frobnicate"}} {
+		name := "no arguments"
+		if len(args) > 0 {
+			name = "unknown subcommand"
+		}
+		t.Run(name, func(t *testing.T) {
+			setEnv(t, "", "", "")
+			code, _, stderr := runSard(t, args...)
+			if code != 2 {
+				t.Fatalf("exit = %d, want 2; stderr:\n%s", code, stderr)
+			}
+			_, section, ok := strings.Cut(string(stderr), "\nAvailable Commands:\n")
+			if !ok {
+				t.Fatalf("no Available Commands section; stderr:\n%s", stderr)
+			}
+			for _, want := range []string{"check", "ingest"} {
+				if !strings.Contains(section, want) {
+					t.Errorf("Available Commands does not list %q:\n%s", want, section)
+				}
+			}
+		})
 	}
 }
