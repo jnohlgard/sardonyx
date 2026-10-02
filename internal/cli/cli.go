@@ -176,22 +176,32 @@ Additional help topics:{{range .Commands}}{{if .IsAdditionalHelpTopicCommand}}
 Use "{{.CommandPath}} [command] --help" for more information about a command.{{end}}
 `
 
-// ingestUsageTemplate is cobra v1.10.2's defaultUsageTemplate plus a
-// hand-written Arguments section below the Usage line: the command's
-// Long text is a summary, and the <source> description reads better
-// next to the usage line it documents than at the top of the help
-// output. It is set explicitly on the ingest command because a command
-// inherits its parent's usage template, and the root uses
-// rootUsageTemplate — without this, the root's trimmed template (no
-// UseLine) would render an empty Usage line for "sard ingest --help".
-// Keep in sync with the default in the cobra version pinned in go.mod.
+// ingestUsageTemplate is cobra v1.10.2's defaultUsageTemplate plus two
+// hand-written sections below the Usage line: an Arguments section
+// (the command's Long text is a summary, and the <source> description
+// reads better next to the usage line it documents than at the top of
+// the help output) and a static Environment section summarizing the
+// env vars behind the flags (the names must stay in sync with
+// internal/config; TestIngestUsageTemplateEnvNames guards that). It is
+// set explicitly on the ingest command because a command inherits its
+// parent's usage template, and the root uses rootUsageTemplate —
+// without this, the root's trimmed template (no UseLine) would render
+// an empty Usage line for "sard ingest --help". Keep the default part
+// in sync with the cobra version pinned in go.mod.
 const ingestUsageTemplate = `Usage:{{if .Runnable}}
   {{.UseLine}}
 
 Arguments:
   <source>  A git repository URL (https://host/owner/repo,
             git@host:owner/repo, or the owner/repo shorthand for
-            github.com) or a local directory path.{{end}}{{if .HasAvailableSubCommands}}
+            github.com) or a local directory path.
+
+Environment:
+  ONYX_API_URL     Onyx API base URL (--api-url)
+  ONYX_API_KEY     Onyx API key (--api-key)
+  ONYX_CC_PAIR_ID  connector-credential pair id (--cc-pair-id)
+  GIT_TOKEN        token for private repos (--token)
+  SARD_ID_BASE     document-ID base for the run (--id-base){{end}}{{if .HasAvailableSubCommands}}
   {{.CommandPath}} [command]{{end}}{{if gt (len .Aliases) 0}}
 
 Aliases:

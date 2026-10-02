@@ -22,6 +22,7 @@ import (
 	"testing"
 	"time"
 
+	"sardonyx/internal/config"
 	"sardonyx/internal/models"
 )
 
@@ -889,5 +890,23 @@ func TestRunVersion(t *testing.T) {
 	}
 	if len(errOut) != 0 {
 		t.Fatalf("stderr = %q, want empty", errOut)
+	}
+}
+
+// TestIngestUsageTemplateEnvNames guards the static Environment
+// section of ingestUsageTemplate against drift: the section's env var
+// names are hand-written, so each name defined in internal/config must
+// appear in it.
+func TestIngestUsageTemplateEnvNames(t *testing.T) {
+	for _, name := range []string{
+		config.EnvAPIURL,
+		config.EnvAPIKey,
+		config.EnvCCPairID,
+		config.EnvGitToken,
+		config.EnvIDBase,
+	} {
+		if !strings.Contains(ingestUsageTemplate, name) {
+			t.Errorf("Environment section of ingestUsageTemplate is missing %s", name)
+		}
 	}
 }

@@ -140,8 +140,11 @@ Implementation notes:
   `--exclude` flags are pflag's `StringArray` (no comma splitting, one
   value per occurrence). The `ingest` help output is a summary paragraph
   (the command's Long text), the usage line, an Arguments section
-  describing `<source>` (a hand-written addition to the usage template,
-  below the usage line), and the flag list.
+  describing `<source>`, a static Environment section summarizing the
+  env vars behind the flags (the names are hand-written and kept in
+  sync with `internal/config` by `TestIngestUsageTemplateEnvNames`),
+  and the flag list — all hand-written additions to the usage
+  template, below the usage line.
 - Logging via `log/slog` (level from `--log-level`); log output goes to stderr.
 - Root-level `--version` (and `-v`), a cobra built-in: it prints the
   version string stamped at build time (`main.version`, README
