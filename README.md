@@ -64,7 +64,8 @@ CGO_ENABLED=0 go build -ldflags "-X main.version=1.0.0" -o sard ./cmd/sard
 
 - `CGO_ENABLED=0` makes the binary fully static (`file sard` →
   `… statically linked …`), so it runs on almost any Linux machine.
-- The `-X main.version=…` stamp is optional (it defaults to `dev`).
+- The `-X main.version=…` stamp is optional (it defaults to `dev`); it is
+  what `sard --version` prints.
 - Building needs a Go toolchain (`go 1.24` per `go.mod`) and, for ingesting
   git repositories at run time, a `git` binary on the target.
 
@@ -124,7 +125,7 @@ CGO_ENABLED=0 go build -ldflags "-X main.version=1.0.0" -o sard ./cmd/sard
 
 - `CGO_ENABLED=0` → single static binary, no shared-library dependencies.
 - `-X main.version=<version>` → stamps the build's version string
-  (default `dev` when omitted).
+  (default `dev` when omitted); `sard --version` prints it.
 - Cross-compiling works the same way with a target prefix, e.g.
   `CGO_ENABLED=0 GOOS=windows GOARCH=amd64 go build … -o sard.exe`.
 

@@ -869,3 +869,25 @@ func TestRunInterruptedSummary(t *testing.T) {
 		t.Errorf("no failure line for the in-flight file; stderr:\n%s", stderrS)
 	}
 }
+
+// TestRunVersion verifies the root command's --version flag (the cobra
+// built-in activated by cli.Version): it prints "sard version
+// <version>" to stdout, writes nothing to stderr, and exits 0
+// (docs/PLAN.md §8). cmd/sard assigns the build-time main.version
+// stamp to Version; the test assigns it directly.
+func TestRunVersion(t *testing.T) {
+	old := Version
+	Version = "1.2.3"
+	defer func() { Version = old }()
+
+	code, out, errOut := runSard(t, "--version")
+	if code != 0 {
+		t.Fatalf("exit = %d, want 0; stderr: %s", code, errOut)
+	}
+	if want := "sard version 1.2.3\n"; string(out) != want {
+		t.Fatalf("stdout = %q, want %q", out, want)
+	}
+	if len(errOut) != 0 {
+		t.Fatalf("stderr = %q, want empty", errOut)
+	}
+}

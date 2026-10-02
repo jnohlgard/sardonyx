@@ -27,9 +27,12 @@
 // aborts promptly.
 //
 // --help prints the auto-generated usage to stdout and exits 0 (cobra's
-// convention); all other output — logging, error diagnostics, usage on
-// errors — goes to stderr, so stdout stays clean for --dry-run payloads.
-// cmd/sard stays a one-line wrapper around Run and os.Exit.
+// convention); the root's --version flag prints the build-stamped
+// version string (Version, default "dev") to stdout and exits 0. All
+// other output — logging, error diagnostics, usage on errors — goes to
+// stderr, so stdout stays clean for --dry-run payloads. cmd/sard stays
+// a thin wrapper: it assigns the build-time main.version stamp to
+// Version and maps Run's code to os.Exit.
 //
 // Exit codes (docs/PLAN.md §8):
 //
@@ -211,13 +214,22 @@ Additional help topics:{{range .Commands}}{{if .IsAdditionalHelpTopicCommand}}
 Use "{{.CommandPath}} [command] --help" for more information about a command.{{end}}
 `
 
-// newRootCmd builds the root `sard` command. It carries no flags of its
-// own; invoked without a subcommand its RunE returns errNoSubcommand
-// and Run prints the auto-generated top-level usage.
+// Version is the running binary's version, printed by the root
+// command's --version flag (`sard version <Version>` on stdout, exit
+// 0). cmd/sard assigns it from the build-time main.version stamp
+// (README "Building"); the default "dev" applies to plain builds.
+var Version = "dev"
+
+// newRootCmd builds the root `sard` command. Because Version is
+// non-empty, cobra's execute() registers the built-in -v/--version
+// flag on it (the root's only flag); invoked without a subcommand its
+// RunE returns errNoSubcommand and Run prints the auto-generated
+// top-level usage.
 func newRootCmd() *cobra.Command {
 	root := &cobra.Command{
-		Use:   "sard",
-		Short: "Ingest Markdown files from a git repository or a local directory into Onyx",
+		Use:     "sard",
+		Version: Version,
+		Short:   "Ingest Markdown files from a git repository or a local directory into Onyx",
 		Long: `sard is a bulk-ingestion utility for Onyx (https://onyx.app): point
 it at a git repository or a local directory and every .md, .mdx, and
 .markdown file inside is converted into an Onyx document and sent to

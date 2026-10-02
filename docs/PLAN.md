@@ -140,6 +140,12 @@ Implementation notes:
   flags are pflag's `StringArray` (no comma splitting, one value per
   occurrence).
 - Logging via `log/slog` (level from `--log-level`); log output goes to stderr.
+- Root-level `--version` (and `-v`), a cobra built-in: it prints the
+  version string stamped at build time (`main.version`, README
+  "Building"; default `dev` for plain builds) to stdout and exits 0.
+  `cmd/sard` forwards the stamp to `cli.Version`; the flag exists on
+  the root command only, so `sard ingest --version` is an unknown flag
+  (exit 2).
 
 Decisions made while implementing T7 (recorded in the `internal/cli` package doc):
 
@@ -272,6 +278,14 @@ Decisions (cobra migration, post-T10):
   other exit-code behavior in §8 is unchanged, including the
   configuration-error matrix and the SIGINT paths (verified by the
   existing `cli_test.go` suite, unmodified).
+- **`--version` activates the documented build stamp (post-T10).** T10's
+  build recipe (`-X main.version=…`) and the `var version = "dev"` in
+  `cmd/sard` predated the flag — the stamp was dead. Setting the root
+  command's `Version` (a new `cli.Version` variable, default `dev`,
+  assigned in `main` from the stamp) switches on cobra's built-in
+  `--version`/`-v`: `sard --version` prints `sard version <version>`
+  to stdout and exits 0, like git's `git version`. The flag is
+  root-only; covered by `TestRunVersion`.
 
 Examples (documented in the README's Getting started):
 
@@ -479,7 +493,7 @@ Implementation decisions (T6, recorded after the fact):
   one `failed: <file> — <reason>` line per failed file in ingestion order.
   During a real run, every file also gets a progress line
   `[i/N] <file> → created|updated|failed`. All of it goes to stderr; stdout
-  stays reserved for `--dry-run` JSON.
+  stays reserved for `--dry-run` JSON and the `--version` output.
 
 ---
 
@@ -496,7 +510,7 @@ sardonyx/
 │   └── onyx-ingestion-api.md    # condensed reference for the Ingestion API
 ├── cmd/
 │   └── sard/
-│       └── main.go              # thin entry point: flag parse, run, exit code
+│       └── main.go              # thin entry point: version stamp, run, exit code
 └── internal/
     ├── cli/
     │   ├── cli.go               # pipeline orchestration, summary, exit codes
