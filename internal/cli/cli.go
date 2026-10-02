@@ -216,8 +216,16 @@ Use "{{.CommandPath}} [command] --help" for more information about a command.{{e
 // and Run prints the auto-generated top-level usage.
 func newRootCmd() *cobra.Command {
 	root := &cobra.Command{
-		Use:           "sard",
-		Short:         "Ingest Markdown files from a git repository or a local directory into Onyx",
+		Use:   "sard",
+		Short: "Ingest Markdown files from a git repository or a local directory into Onyx",
+		Long: `sard is a bulk-ingestion utility for Onyx (https://onyx.app): point
+it at a git repository or a local directory and every .md, .mdx, and
+.markdown file inside is converted into an Onyx document and sent to
+the Onyx Ingestion API, so the documentation becomes part of Onyx's
+knowledge base — searchable and usable by its AI features. It is a
+one-shot sync: run it whenever your docs change. Re-running is safe;
+document IDs are deterministic, so a second run updates existing
+documents instead of duplicating them.`,
 		SilenceErrors: true,
 		SilenceUsage:  true,
 		RunE:          func(cmd *cobra.Command, args []string) error { return errNoSubcommand },
