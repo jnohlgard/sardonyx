@@ -33,7 +33,18 @@
 // 1 s / 4 s / 16 s per §7) so tests can inject millisecond waits and the
 // suite stays fast; production clients keep the full schedule. With the
 // 3-attempt cap only the first two waits fire (1 s, 4 s); the third
-// entry (16 s) is kept so a raised cap has its slot.
+// entry (16 s) is kept so a raised cap has its slot. Check (check.go,
+// task T11a) reuses the same field for its probes.
+//
+// Check is the sard check pre-flight (docs/PLAN.md §13): three
+// read-only probes — GET /health, GET /onyx-api/ingestion (with the
+// deliberately-invalid POST fallback for older deployments), and GET
+// /manage/admin/cc-pair/{id} — that verify reachability, the key's
+// ingestion permission, and the cc-pair's existence without creating,
+// updating, or deleting any document. It fails via the ErrUnreachable,
+// ErrNoIngestionAPI, and ErrCCPairNotFound sentinels (plus ErrAuth for
+// a 401/403) so the CLI can map them to exit codes 1 / 2 (2 / 2); the
+// NewClient ccPairID argument is what probe 3 queries.
 //
 // The API key is never logged or included in error text or reasons.
 package onyx

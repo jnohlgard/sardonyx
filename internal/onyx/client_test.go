@@ -54,6 +54,7 @@ func fastClient(t *testing.T, ts *httptest.Server) *Client {
 
 // requestRec is one request as seen by the test server.
 type requestRec struct {
+	Method      string
 	Path        string
 	Auth        string
 	ContentType string
