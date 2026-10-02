@@ -1,10 +1,9 @@
 # Sardonyx — Implementation Plan
 
-**Status:** ✅ T1–T10 complete (config, models, transform, local directory
+**Status:** ✅ T1–T11 complete (config, models, transform, local directory
 source, git repository source, Onyx client, CLI wiring, summary &
-polish, test hardening, build & README). 📋 T11 — the `sard check`
-command — is planned in §13; its implementation lands in a follow-up
-session.
+polish, test hardening, build & README, and the `sard check` pre-flight
+command, §13).
 
 **Language:** Go (switched from Python, 2026-10 — motivation: a single static
 binary that needs no interpreter or virtualenv on the target machine). The
@@ -648,7 +647,7 @@ Run with `go test ./...`.
   - T11a — `onyx.Client.Check` in a new `internal/onyx/check.go` (probes
     1/2/2f/3, the new `ErrUnreachable` / `ErrCCPairNotFound` sentinels,
     the `CheckResult` / `CCPairInfo` types).
-    Accept: `go test ./internal/onyx` green: the happy path (exactly one
+    - Accept: ✅ `go test ./internal/onyx` green: the happy path (exactly one
     request per probe — method, path, and Bearer header asserted; the key
     in no returned string); 401 on probe 2 → `ErrAuth` with exactly one
     request (no retry, no further probes); 403 on probe 2 → the 2f
@@ -668,7 +667,7 @@ Run with `go test ./...`.
     runs in ~1 s.
   - T11b — the `sard check` command in `internal/cli` (flags, usage
     template, `runCheck`, the report, the exit-code mapping, package doc).
-    Accept: end-to-end `Run` against `httptest` — exit 0 (report lines on
+    - Accept: ✅ end-to-end `Run` against `httptest` — exit 0 (report lines on
     stderr, stdout empty, the server received no document-shaped POST);
     exit 2 for a missing API key / missing cc-pair-id, a negative
     `--cc-pair-id`, an invalid `--log-level`, a 401, a 403, a cc-pair 404
@@ -681,7 +680,7 @@ Run with `go test ./...`.
     existing ingest/dry-run suite passes unmodified.
   - T11c — README ("Verify your setup" subsection in Getting started +
     an intro line) and the final docs pass.
-    Accept: the Getting started flow reads set credentials →
+    - Accept: ✅ the Getting started flow reads set credentials →
     `sard check` → first real run; `go test ./...` and `go vet ./...`
     green; the coverage gates unchanged (config ≥ 90 % — 93.6 % —,
     transform 100 %, all ten URL-normalization functions 100 %; the
@@ -728,8 +727,9 @@ Run with `go test ./...`.
 
 ## 13. The `sard check` command (T11)
 
-**Status:** planned — this section is the implementation plan; the code
-lands in a follow-up session (task T11, §10).
+**Status:** implemented — T11 (§10) is done: `onyx.Client.Check`
+(`internal/onyx/check.go`), the `sard check` command (`internal/cli`),
+and the README's "Verify your setup" section.
 
 `sard check` is a second subcommand (alongside `ingest`) that verifies the
 environment **without creating, updating, or deleting any document**:

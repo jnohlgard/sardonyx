@@ -10,13 +10,14 @@
 
 ---
 
-> **Status:** ✅ Complete — all implementation tasks T1–T10 are done (task list in
+> **Status:** ✅ Complete — all implementation tasks T1–T11 are done (task list in
 > `docs/PLAN.md` §10). The tool builds to a single static binary
 > (see [Building](#building)).
 
 ## What it does
 
 ```bash
+sard check                                           # pre-flight: verify the environment without creating any document
 sard ingest https://github.com/owner/repo            # all *.md / *.mdx / *.markdown in the repo
 sard ingest ./my-docs                                # all Markdown files under a local directory
 sard ingest https://github.com/owner/repo --include "docs/**" --dry-run
@@ -104,7 +105,45 @@ spend a real run on it.
 > intend to keep; see [Known limitations](#known-limitations-v1) and
 > `docs/PLAN.md` §11 for the discussion.
 
-### 4. Real run
+### 4. Verify your setup
+
+Once you have an API key and a cc-pair id (set them as a flag, an
+environment variable, or in a `.env` — see [Configuration](#configuration)),
+verify the environment before the first real run:
+
+```bash
+sard check
+```
+
+`sard check` talks to the Onyx server with those credentials and answers,
+**without creating, updating, or deleting a single document**:
+
+1. **Reachability** — the Onyx server at `ONYX_API_URL` answers
+   (`GET /health`);
+2. **Credentials** — the API key is accepted **with the permission the
+   Ingestion API requires** (`manage:connectors` or admin — not just
+   *some* permission): the check probes the same endpoint a real run
+   writes to, so a pass is a statement about ingestion specifically;
+3. **cc-pair** (best-effort) — the configured `cc_pair_id` exists on the
+   deployment; the report shows the connector name, the pair's status,
+   and the number of indexed documents.
+
+When it exits `0`, the first real run cannot fail on an environmental
+problem. A failing check prints a single actionable error line; the
+common failure modes:
+
+- **exit 1 — unreachable**: the server at `ONYX_API_URL` did not answer
+  — a wrong host or a misconfigured URL (a missing trailing `/api` is
+  the classic one).
+- **exit 2 — bad key**: the key was rejected (401/403) — it lacks the
+  required permission or is expired; see [Prerequisites](#1-prerequisites-onyx-side).
+- **exit 2 — unknown cc-pair**: the configured id does not exist on this
+  deployment — copy it from the connector's Admin Panel URL
+  (`…/admin/connector/243` → `243`).
+- **exit 2 — no Ingestion API**: the URL's deployment has no
+  `/onyx-api/ingestion` endpoint at all.
+
+### 5. Real run
 
 Put your credentials where you like — CLI flag, environment variable, or a
 `.env` file in the working directory (precedence: flag → env → `.env`);
@@ -148,9 +187,11 @@ Priority: CLI flag → environment variable → `.env` file (current working dir
 | `GIT_TOKEN`       | Token for private repos (injected into the clone URL) | *(optional)*   |
 | `SARD_ID_BASE`    | Arbitrary document-ID base for the run (affects the ID only; PLAN §6) | *(optional)* |
 
-`ONYX_API_KEY` and `ONYX_CC_PAIR_ID` are only required for real ingestion
-runs; `--dry-run` needs neither (it sends nothing). All other flags are
-documented by `sard ingest --help` and in `docs/PLAN.md` §4.
+`ONYX_API_KEY` and `ONYX_CC_PAIR_ID` are required for real ingestion runs
+and for `sard check` (the pre-flight runs the same credential check a real
+run does); `--dry-run` needs neither (it sends nothing). All ingest flags
+are documented by `sard ingest --help` and in `docs/PLAN.md` §4; check has
+only the four Onyx-side flags (`sard check --help`).
 
 See [`.env.example`](.env.example).
 
@@ -166,7 +207,7 @@ interpreter or virtualenv needed on the target machine.
 
 ```
 docs/
-  PLAN.md                # full implementation plan + task breakdown (T1–T10)
+  PLAN.md                # full implementation plan + task breakdown (T1–T11)
   onyx-ingestion-api.md  # condensed reference for the Onyx Ingestion API
 cmd/sard/
   main.go                # thin entry point: run + exit code
@@ -178,6 +219,7 @@ internal/
   source/local.go        # directory walk, filters, mtime
   transform/markdown.go  # IngestedFile → Onyx payload
   onyx/client.go         # HTTP client, retries, result mapping
+  onyx/check.go          # the sard check pre-flight: three read-only probes
 ```
 
 Tests live next to the code in each package as `*_test.go` (mock Onyx server
