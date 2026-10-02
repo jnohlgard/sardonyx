@@ -25,9 +25,10 @@ git repo URL or a local directory into Onyx via the Ingestion API.
 
 ## Rules
 - Go; stdlib-first — the only external dependencies are `godotenv` (`.env`
-  loading) and `doublestar/v4` (globs), declared in `go.mod`; do not add other
-  dependencies without discussion. Tests via `go test` (`net/http/httptest`
-  for HTTP mocking).
+  loading), `doublestar/v4` (globs), and `spf13/cobra` (CLI argument
+  parsing + auto-generated help; used only in `internal/cli`), declared in
+  `go.mod`; do not add other dependencies without discussion. Tests via
+  `go test` (`net/http/httptest` for HTTP mocking).
 - Config precedence: CLI flag > env var > `.env`; `.env` is never committed.
 - Never log or echo the Onyx API key or git token.
 

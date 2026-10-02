@@ -132,8 +132,13 @@ Options
 
 Implementation notes:
 
-- Single subcommand, so stdlib `flag` is used (no CLI framework). The repeatable
-  `--include` / `--exclude` flags are a small append-value helper.
+- Single subcommand. `spf13/cobra` provides the root `sard` command and
+  the `ingest` subcommand; the flag definitions on `ingest` are the single
+  source of truth for `--help` — cobra renders the usage line and the
+  option list from the same definitions that bind the parsed values, so
+  the two cannot drift apart. The repeatable `--include` / `--exclude`
+  flags are pflag's `StringArray` (no comma splitting, one value per
+  occurrence).
 - Logging via `log/slog` (level from `--log-level`); log output goes to stderr.
 
 Decisions made while implementing T7 (recorded in the `internal/cli` package doc):
@@ -156,10 +161,11 @@ Decisions made while implementing T7 (recorded in the `internal/cli` package doc
 - An Onyx 401/403 (`onyx.ErrAuth`) aborts the run with exit **2**: a rejected
   key is a credentials problem, and every remaining file would fail identically
   (see §7 fail-fast, §8).
-- The stdlib `flag` package stops parsing at the first positional argument, but
-  the form above puts `<source>` first; `Run` therefore re-sorts the arguments
-  into flags (with their values) plus positionals before parsing, so both
+- pflag parses flags and the positional `<source>` in any order, so both
   `sard ingest ./docs --dry-run` and `sard ingest --dry-run ./docs` work.
+  (T7 originally compensated for stdlib `flag` stopping at the first
+  positional argument with a re-sorting pre-parser; the cobra migration
+  removed it.)
 
 Decisions made while implementing T8 (summary & polish):
 
@@ -242,6 +248,30 @@ Decisions made while implementing T10 (build & README):
 - **No release pipeline.** There is no artifact to link, so the README
   documents building from source (the static-build recipe, and
   `go install sardonyx/cmd/sard` from a checkout) and says so.
+
+Decisions (cobra migration, post-T10):
+
+- **cobra instead of stdlib `flag`.** The stdlib made T7's `ingest`-level
+  `--help` auto-generated, but the top-level usage was hand-written text
+  and the positional-first form needed the `reorderFlags` pre-parser — a
+  hand-rolled argument parser, exactly where edge-case bugs live.
+  `spf13/cobra` (the de facto standard for Go CLIs: `kubectl`, `gh`,
+  `hugo`) removes both: the usage line and the option list render from
+  the flag definitions themselves. Both commands run with
+  `SilenceErrors`/`SilenceUsage`, so `Run` keeps sole ownership of all
+  diagnostics/usage output and of the exit codes; `cli.Run`'s signature
+  is unchanged and `cmd/sard` stays a one-line wrapper.
+- **Help conventions follow cobra.** `--help` (and `-h`, new) prints
+  auto-generated usage to **stdout** and exits 0 (previously stderr;
+  bare `sard --help` was exit 2). `sard` without a subcommand and
+  `sard <bogus>` print the auto-generated top-level usage to stderr and
+  exit 2 — a trimmed usage template without the misleading
+  "sard [flags]" line; the hand-written usage block is gone, and the
+  `<source>` description now lives in the ingest command's long text.
+  `sard help` and `sard completion <shell>` are cobra built-ins. Every
+  other exit-code behavior in §8 is unchanged, including the
+  configuration-error matrix and the SIGINT paths (verified by the
+  existing `cli_test.go` suite, unmodified).
 
 Examples (documented in the README's Getting started):
 
@@ -457,7 +487,7 @@ Implementation decisions (T6, recorded after the fact):
 
 ```
 sardonyx/
-├── go.mod                       # module sardonyx (deps: godotenv, doublestar/v4)
+├── go.mod                       # module sardonyx (deps: godotenv, doublestar/v4, cobra)
 ├── README.md                    # project overview, getting started, build, usage
 ├── .env.example                 # ONYX_API_KEY / ONYX_API_URL / ONYX_CC_PAIR_ID / GIT_TOKEN
 ├── .gitignore
