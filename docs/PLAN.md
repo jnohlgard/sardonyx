@@ -134,11 +134,14 @@ Implementation notes:
 
 - Single subcommand. `spf13/cobra` provides the root `sard` command and
   the `ingest` subcommand; the flag definitions on `ingest` are the single
-  source of truth for `--help` — cobra renders the usage line and the
-  option list from the same definitions that bind the parsed values, so
-  the two cannot drift apart. The repeatable `--include` / `--exclude`
-  flags are pflag's `StringArray` (no comma splitting, one value per
-  occurrence).
+  source of truth for the flag list in `--help` — cobra renders the usage
+  line and the option list from the same definitions that bind the parsed
+  values, so the two cannot drift apart. The repeatable `--include` /
+  `--exclude` flags are pflag's `StringArray` (no comma splitting, one
+  value per occurrence). The `ingest` help output is a summary paragraph
+  (the command's Long text), the usage line, an Arguments section
+  describing `<source>` (a hand-written addition to the usage template,
+  below the usage line), and the flag list.
 - Logging via `log/slog` (level from `--log-level`); log output goes to stderr.
 - Root-level `--version` (and `-v`), a cobra built-in: it prints the
   version string stamped at build time (`main.version`, README
@@ -273,7 +276,8 @@ Decisions (cobra migration, post-T10):
   `sard <bogus>` print the auto-generated top-level usage to stderr and
   exit 2 — a trimmed usage template without the misleading
   "sard [flags]" line; the hand-written usage block is gone, and the
-  `<source>` description now lives in the ingest command's long text.
+  `<source>` description lives in an Arguments section of the ingest
+  usage template, below the usage line (help's Long is a summary).
   `sard help` and `sard completion <shell>` are cobra built-ins. Every
   other exit-code behavior in §8 is unchanged, including the
   configuration-error matrix and the SIGINT paths (verified by the

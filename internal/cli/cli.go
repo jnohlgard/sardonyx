@@ -176,15 +176,22 @@ Additional help topics:{{range .Commands}}{{if .IsAdditionalHelpTopicCommand}}
 Use "{{.CommandPath}} [command] --help" for more information about a command.{{end}}
 `
 
-// ingestUsageTemplate is a verbatim copy of cobra v1.10.2's
-// defaultUsageTemplate (cobra does not export it). It is set explicitly
-// on the ingest command because a command inherits its parent's usage
-// template, and the root uses rootUsageTemplate — without this, the
-// root's trimmed template (no UseLine) would render an empty Usage line
-// for "sard ingest --help". Keep in sync with the default in the cobra
-// version pinned in go.mod.
+// ingestUsageTemplate is cobra v1.10.2's defaultUsageTemplate plus a
+// hand-written Arguments section below the Usage line: the command's
+// Long text is a summary, and the <source> description reads better
+// next to the usage line it documents than at the top of the help
+// output. It is set explicitly on the ingest command because a command
+// inherits its parent's usage template, and the root uses
+// rootUsageTemplate — without this, the root's trimmed template (no
+// UseLine) would render an empty Usage line for "sard ingest --help".
+// Keep in sync with the default in the cobra version pinned in go.mod.
 const ingestUsageTemplate = `Usage:{{if .Runnable}}
-  {{.UseLine}}{{end}}{{if .HasAvailableSubCommands}}
+  {{.UseLine}}
+
+Arguments:
+  <source>  A git repository URL (https://host/owner/repo,
+            git@host:owner/repo, or the owner/repo shorthand for
+            github.com) or a local directory path.{{end}}{{if .HasAvailableSubCommands}}
   {{.CommandPath}} [command]{{end}}{{if gt (len .Aliases) 0}}
 
 Aliases:
@@ -248,16 +255,19 @@ documents instead of duplicating them.`,
 
 // newIngestCmd builds the `sard ingest` subcommand (docs/PLAN.md §4):
 // the flags bound to p and a RunE wired to runIngest. The flag
-// definitions are the single source of truth for --help — cobra renders
-// the usage line and the option list from them.
+// definitions are the single source of truth for the flag list in
+// --help — cobra renders the usage line and the option list from the
+// same definitions that bind the parsed values. The Long text is a
+// summary; the <source> description lives in the Arguments section of
+// ingestUsageTemplate, below the usage line.
 func newIngestCmd(p *ingestFlags) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "ingest <source>",
 		Short: "Ingest a git repository or a local directory into Onyx",
-		Long: `<source> is a git repository URL (https://host/owner/repo,
-git@host:owner/repo, or the owner/repo shorthand for github.com) or a
-local directory path. Every Markdown file (.md, .mdx, .markdown) found
-is converted to an Onyx document and sent to the Ingestion API.
+		Long: `Ingests every Markdown file (.md, .mdx, .markdown) found under
+<source> into Onyx via the Ingestion API: each file becomes one
+document with a stable ID, so re-running the same command updates
+documents instead of duplicating them.
 
 Use --dry-run to print the would-be payloads to stdout — one JSON
 document per file — and send nothing; a dry run needs no Onyx
