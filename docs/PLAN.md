@@ -2,8 +2,9 @@
 
 **Status:** ✅ T1–T10 complete (config, models, transform, local directory
 source, git repository source, Onyx client, CLI wiring, summary &
-polish, test hardening, build & README). All tasks in §10 are done;
-no stub packages remain.
+polish, test hardening, build & README). 📋 T11 — the `sard check`
+command — is planned in §13; its implementation lands in a follow-up
+session.
 
 **Language:** Go (switched from Python, 2026-10 — motivation: a single static
 binary that needs no interpreter or virtualenv on the target machine). The
@@ -301,6 +302,10 @@ sard ingest https://github.com/onyx-dot-app/onyx --cc-pair-id 42
 sard ingest ./my-docs --api-url http://onyx.local:8080/api --api-key $ONYX_API_KEY
 sard ingest https://github.com/org/repo --include "docs/**" --dry-run
 ```
+
+There is also a `sard check` subcommand (T11, §13): it validates the
+configuration and verifies Onyx connectivity and credentials without
+creating any document — the pre-flight to run before a first real ingest.
 
 ---
 
@@ -637,6 +642,50 @@ Run with `go test ./...`.
     No Go behavior changes beyond that enabling change; the coverage
     reading above is unchanged by T10 (config 93.6%, transform 100%,
     all ten normalization functions 100%).
+- **T11 — `sard check`** (§13) — a second subcommand that verifies the
+  environment without creating any document: configuration pre-flight,
+  connectivity, credentials, and best-effort cc-pair validation.
+  - T11a — `onyx.Client.Check` in a new `internal/onyx/check.go` (probes
+    1/2/2f/3, the new `ErrUnreachable` / `ErrCCPairNotFound` sentinels,
+    the `CheckResult` / `CCPairInfo` types).
+    Accept: `go test ./internal/onyx` green: the happy path (exactly one
+    request per probe — method, path, and Bearer header asserted; the key
+    in no returned string); 401 on probe 2 → `ErrAuth` with exactly one
+    request (no retry, no further probes); 403 on probe 2 → the 2f
+    disambiguation (the real run's endpoint decides): POST 403 →
+    `ErrAuth`, POST 422 → `KeyOK` + `UsedFallback`, POST 200 → `KeyOK`
+    (warning); GET 404/405 → 2f, whose request body is asserted to be
+    exactly `{}` with `Content-Type: application/json`; 2f POST 404/405 →
+    non-auth error (no Ingestion API at this URL); 429 → 200 (2 requests)
+    and 500 ×3 → non-auth error (millisecond backoff injection); a
+    connection failure on probe 1 → `ErrUnreachable` with *no* requests
+    to the other endpoints; a connection failure on probe 2 after 3
+    attempts → `ErrUnreachable`; health 200 with `success:false` and
+    health 404 → no error, `Healthy=false`; probe 3 200 → `CCPair`
+    populated; probe 3 404 after a GET success → `ErrCCPairNotFound`;
+    probe 3 403/404 in the fallback flow → no error, `CCPair` nil;
+    context cancellation mid-flight → the context's error. The suite
+    runs in ~1 s.
+  - T11b — the `sard check` command in `internal/cli` (flags, usage
+    template, `runCheck`, the report, the exit-code mapping, package doc).
+    Accept: end-to-end `Run` against `httptest` — exit 0 (report lines on
+    stderr, stdout empty, the server received no document-shaped POST);
+    exit 2 for a missing API key / missing cc-pair-id, a negative
+    `--cc-pair-id`, an invalid `--log-level`, a 401, a 403, a cc-pair 404
+    (the message names the configured id, never the key), and a URL with
+    no Ingestion API; exit 1 for a dead port; 130 for SIGINT mid-check;
+    `sard check --help` → exit 0 with exactly four flags and an
+    Environment section listing exactly `ONYX_API_URL`, `ONYX_API_KEY`,
+    `ONYX_CC_PAIR_ID` (a `TestCheckUsageTemplateEnvNames` guard, mirroring
+    the ingest one); the root usage lists `check` and `ingest`. The
+    existing ingest/dry-run suite passes unmodified.
+  - T11c — README ("Verify your setup" subsection in Getting started +
+    an intro line) and the final docs pass.
+    Accept: the Getting started flow reads set credentials →
+    `sard check` → first real run; `go test ./...` and `go vet ./...`
+    green; the coverage gates unchanged (config ≥ 90 % — 93.6 % —,
+    transform 100 %, all ten URL-normalization functions 100 %; the
+    onyx and cli packages are not gated).
 
 ---
 
@@ -654,6 +703,9 @@ Run with `go test ./...`.
 | 8 | **Very large monorepos**: thousands of md files → long sequential runs. | `--include` scoping + `--limit`; concurrency is a v2 item. |
 | 9 | **Go toolchain on the target machine**: only needed to *build*; the shipped binary is static. | Document build instructions; ship prebuilt binaries for common platforms. |
 | 10 | **Document ID migration**: forks, repo URL changes, and moved local roots change the default ID base → new IDs → previous documents go stale (no delete API, #1). | `--id-base` / `SARD_ID_BASE` override; recommend pinning one canonical base per project (§6). |
+| 11 | **The Ingestion API now lists a delete operation** (reference fetched 2026-10-02, "Delete Ingestion Doc"): the v1 premise that the API has no delete (#1, README limitation) is likely out of date. | v1 stance (no delete; stale documents documented) stands; verify the operation's auth and semantics before any v2 prune work. `sard check` (T11) does not depend on it. |
+| 12 | **401/403 behind a reverse proxy / WAF**: a fronting proxy can return 401/403 for reasons other than key rejection; the check's advice assumes Onyx itself answered. | No v1 mitigation: the report carries the status code so a human can tell them apart; the hint still names the variable to check. |
+| 13 | **Permission matrix beyond the plain API key**: the check targets the documented key shape (`manage:connectors` / `admin`); a Group Manager key 403s on the *list* endpoint yet may still ingest into the pairs of the groups it manages. | A probe-2 403 falls through to the POST fallback — the endpoint a real run uses — and its verdict wins; probe 3 treats 403/404 (fallback flow) as warnings, not failures. Real runs have the same limitation today (§2). |
 
 ---
 
@@ -671,3 +723,189 @@ Run with `go test ./...`.
   `t.Skip` when git is not on PATH).
 - **End-to-end smoke:** `internal/cli` runs the full pipeline with `--dry-run` against the
   `httptest` server, invoked from the same entry function the binary uses.
+
+---
+
+## 13. The `sard check` command (T11)
+
+**Status:** planned — this section is the implementation plan; the code
+lands in a follow-up session (task T11, §10).
+
+`sard check` is a second subcommand (alongside `ingest`) that verifies the
+environment **without creating, updating, or deleting any document**:
+
+1. **Configuration** — the exact pre-flight a real run performs:
+   `ONYX_API_KEY` and `ONYX_CC_PAIR_ID` required (flag > env > `.env`),
+   invalid values rejected (exit 2).
+2. **Connectivity** — the Onyx server at `--api-url` answers.
+3. **Credentials** — the API key is accepted **with the permissions the
+   Ingestion API requires** (`manage:connectors` or `admin`), not merely
+   *some* permission.
+4. **cc-pair (best-effort)** — the configured `cc_pair_id` exists on the
+   deployment; the check reports the connector name, the pair's status,
+   and the number of indexed documents. A non-existent id is an
+   **error**: the Ingestion `POST` accepts a bogus id (the documents are
+   created but never appear on the Connectors page), so a real run with
+   a wrong id fails silently.
+
+The purpose: it is *the* pre-flight for a real run. After setting up
+credentials, run `sard check` once; when it exits 0, the first
+`sard ingest` cannot fail on an environmental problem.
+
+### 13.1 Spec
+
+```
+sard check [options]                (no positional arguments)
+
+Options
+  --api-url      Onyx API base URL        (default https://cloud.onyx.app/api; env ONYX_API_URL)
+  --api-key      Onyx API key             (env ONYX_API_KEY)
+  --cc-pair-id   Onyx connector-credential-pair id, int  (env ONYX_CC_PAIR_ID)
+  --log-level    debug | info | warning | error (default info)
+```
+
+Only the Onyx-side flags exist — no `--source`, `--branch`, `--token`,
+include/exclude, depth/size, `--limit`, `--dry-run`, or `--id-base`:
+discovery is out of scope for check, and git concerns do not apply.
+`--cc-pair-id` is treated exactly as in ingest: `0` is "unset", negative
+is invalid. The usage template follows the ingest convention (a Long
+summary; an Environment section listing exactly `ONYX_API_URL`,
+`ONYX_API_KEY`, `ONYX_CC_PAIR_ID`; no Arguments section, since there is
+no positional argument).
+
+### 13.2 The probes
+
+Three HTTP probes, in order. Every probe is read-only from Onyx's point
+of view — the one request that resembles a write is the
+deliberately-invalid fallback below, §13.3.
+
+| #   | Request                                                  | Auth   | Purpose                                                                  | Failure handling |
+| --- | -------------------------------------------------------- | ------ | ------------------------------------------------------------------------ | ---------------- |
+| 1   | `GET {api-url}/health`                                   | none   | Reachability; the body's `success` field. Single attempt, 10 s deadline. | Connection failure → **stop the check, exit 1** (no point probing further). 404/405 (older deployment without the endpoint) or any other non-200 → **warn and continue**: probe 2 doubles as the reachability test. |
+| 2   | `GET {api-url}/onyx-api/ingestion`                        | Bearer | Credentials (primary path) + a document count: the read-only sibling of the `POST` a real run uses — same key, same `manage:connectors`/`admin` requirement, so a 200 is specifically a statement about the key's ingestion ability. | 200 → key OK (count reported). 401 → **exit 2** (bad/expired key; the `authHint` advice). 403 → **to 2f for disambiguation** — the key may simply lack the permission for *this* list endpoint while still being able to ingest (e.g. a Group Manager); the POST is the endpoint a real run uses, so its verdict wins. 404/405 (deployment predates the GET) → 2f. 429/5xx/connection → up to 3 attempts with the injectable backoff (same machinery as `Ingest`); exhausted → exit 1 (`ErrUnreachable` for connection, or a persistent server error). |
+| 2f  | Fallback: `POST {api-url}/onyx-api/ingestion` with body `{}` | Bearer | Credentials, checked against the real endpoint (older deployments; or after a probe-2 403). | 401/403 → **exit 2** with the `authHint` advice (now against the endpoint a real run uses). 400/422 → the endpoint exists, auth passed, the body was rejected → **key accepted** (`UsedFallback`). Any other 4xx (404, 405, …) → **exit 2**: "no Onyx Ingestion API at this URL — check `ONYX_API_URL`" (catches a misconfigured base, e.g. a missing trailing `/api`). An unexpected 200 → the key is accepted (the verifiable fact) with a warning. 429/5xx/connection → retried as above; exhausted → exit 1. |
+| 3   | `GET {api-url}/manage/admin/cc-pair/{id}`                 | Bearer | cc-pair validation: name, status, `num_docs_indexed`. | Runs whenever the key was accepted. 200 → the cc-pair report. 404 → **exit 2** "cc-pair-id N not found on this deployment — copy it from the connector's Admin Panel URL", **only when probe 2 was the GET** (the deployment is modern, so the endpoint is known to exist and the 404 means the id doesn't); in the fallback flow an absent endpoint is indistinguishable from an absent pair → warn, don't fail. 403 → warn and continue (the key lacks the scope for *this* endpoint — a Group Manager outside its groups — while having passed the probe that matters for ingestion). Any other outcome → warn (best-effort probe), continue. |
+
+Each probe runs under a 10 s deadline (`context` timeout, inside the
+client's 30 s `http.Client` backstop). Probes 2 and 3 run only if probe 1
+did not find the server unreachable. The whole check runs under a
+signal-aware context (Ctrl-C → exit 130, as with ingest).
+
+### 13.3 Why a document can never be created
+
+The only write path Sardonyx uses in Onyx is `POST /onyx-api/ingestion`,
+and the fallback (2f) does use that path — so the plan must show the
+probe cannot create a document:
+
+- The body is `{}`. The request schema requires the `document` object
+  (`cc_pair_id` is nullable in the current OpenAPI), so the body fails
+  validation — no handler logic runs, nothing is written.
+- On FastAPI (Onyx's stack) the Bearer-auth security dependency is
+  evaluated before the request body is parsed, and the Ingestion API
+  guide documents a bad key as a 4xx error response — so a rejected key
+  never reaches body validation, and an accepted key is rejected by the
+  schema before any code that could create a document runs.
+- Probes 2 (primary), 3, and 1 are plain GETs (probe 1 needs no auth at
+  all).
+
+Residual assumption (stated in the output when it applies): a deployment
+that validated the body *before* auth (non-standard ordering) could
+return 422 to a bad key, which the fallback would misread as "key
+accepted". The fallback runs only on deployments without the GET
+endpoint, and the report explicitly marks when it was used, so the
+verdict can be read with that caveat.
+
+### 13.4 Exit codes
+
+| Code | Condition (check)                                                                                                                                  |
+| ---- | --------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 0    | Server reachable, key accepted (probe 2 or 2f), cc-pair validated — or, where the cc-pair probe could not run, reported as a warning.               |
+| 1    | Server unreachable (connection failure/timeout — probe 1, or probe 2/2f after retries) or persistent 429/5xx.                                       |
+| 2    | Configuration error — the same pre-flight as a real run (missing/invalid `ONYX_API_KEY`/`ONYX_CC_PAIR_ID`, negative `--cc-pair-id`, invalid `--log-level`) — or a rejected key (401/403: a credentials problem, the same classification as the ingest fail-fast, §8) — or the configured cc-pair-id not present on the deployment (probe 3, 404) — or no Onyx Ingestion API at the configured URL (2f, other 4xx). |
+| 130  | Interrupted (Ctrl-C).                                                                                                                                                                        |
+
+The stdout/stderr discipline is inherited from §8: all diagnostics on
+stderr; stdout stays empty (check prints no JSON).
+
+### 13.5 Report
+
+One info line per probe, then a summary header (house style, §8) — all on
+stderr:
+
+```
+time=... level=INFO msg="Onyx at https://cloud.onyx.app/api: health ok"
+time=... level=INFO msg="API key accepted — 23 documents visible via the ingestion API"
+time=... level=INFO msg="cc-pair 243: My Docs — ACTIVE, 12 documents indexed"
+time=... level=INFO msg="check complete: reachable, key ok, cc-pair verified in 1.84s"
+```
+
+A failed check prints no summary header — a single actionable error
+line, then the exit code (the same shape as the ingest auth fail-fast).
+A run that used the fallback (2f) adds a note to its key line (the
+caveat of §13.3, visible in the output).
+
+### 13.6 Implementation
+
+**`internal/onyx/check.go`** (new file beside `client.go`; `client.go`
+keeps `Ingest` as-is):
+
+- `func (c *Client) Check(ctx context.Context) (CheckResult, error)` —
+  runs probes 1 → 2 (or 2f) → 3 per §13.2.
+- Types:
+
+```go
+type CCPairInfo struct {
+	ID     int
+	Name   string
+	Status string
+	Docs   int
+}
+
+type CheckResult struct {
+	Healthy      bool        // probe 1: 200 with success=true
+	KeyOK        bool        // probe 2 or 2f accepted the key
+	DocCount     int         // documents visible to the key (probe 2 only)
+	CCPair       *CCPairInfo // nil = not validated (the report warns)
+	UsedFallback bool        // true = probe 2f (the invalid POST) was used
+}
+```
+
+- New sentinels (beside `ErrAuth` in the package): `ErrUnreachable`
+  (connection failure/timeout, or persistent 429/5xx — after retries)
+  and `ErrCCPairNotFound` (probe 3, 404, modern deployment). `Check`
+  wraps them; the CLI maps them via `errors.Is` to exit 1 / 2.
+- Retryable classes (429, 5xx, connection) reuse the existing
+  injectable-backoff machinery from `Ingest` for probes 2/2f; probe 1 is
+  a single un-retried attempt, and probe 3 is not retried either (a 429
+  there just downgrades to a warning — its verdict is best-effort).
+- The API key never appears in any error or reason string (the existing
+  discipline; the leak test is extended to `Check`).
+
+**`internal/cli/cli.go`**:
+
+- New `checkFlags{apiURL, apiKey, ccPairID, logLevel}` struct (separate
+  from `ingestFlags` — check has no git or source flags), `newCheckCmd`
+  (`Use: "check"`, `Args: cobra.NoArgs`, the four flags above,
+  `checkUsageTemplate` = the ingest template minus the Arguments
+  section, Environment section listing exactly the three Onyx
+  variables), and `runCheck` mirroring `runIngest`'s pre-flight shape:
+  `buildLogger` → flag validation (`--cc-pair-id >= 0`) →
+  `config.Resolve(Flags{…, DryRun: false})` → `signal.NotifyContext` →
+  `onyx.NewClient(…).Check(ctx)` → the report → the exit code.
+- `Run` adds the command to the root; the root usage template already
+  renders the subcommand list, so no template change is needed (the
+  existing root-usage tests gain an assertion for `check`).
+- The package doc is updated to describe the second subcommand and the
+  `check` exit-code mapping.
+- **`internal/config` is unchanged**: `check` calls `Resolve` with
+  `DryRun: false` — exactly the required-credentials set a real run has.
+  That is the point of the command: check is the pre-flight of a real
+  run, minus the documents.
+
+**Tests** (`internal/onyx/check_test.go`, additions to
+`internal/cli/cli_test.go`): see the acceptance criteria in §10.
+
+**README** (T11c): a new "Verify your setup" subsection in Getting
+started (between the dry-run step and the real run: set credentials →
+`sard check` → first real run), the failure modes (bad key, unknown
+cc-pair, wrong URL), and a line in the intro example block.
