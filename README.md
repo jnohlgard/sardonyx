@@ -2,7 +2,7 @@
   <img alt="Sardonyx logo" src="assets/sardonyx-logo-nodule.svg" height="150" />
   <h1 align="center">Sardonyx</h1>
   <p align="center">
-    Ingest **Markdown files** from a **git repository URL** or a **local directory**
+    Ingest Markdown files from a git repository URL or a local directory
     into <a href="https://onyx.app">Onyx</a> via the
     <a href="https://docs.onyx.app/developers/guides/index_files_ingestion_api">Ingestion API</a>
   </p>
