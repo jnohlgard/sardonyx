@@ -3,8 +3,8 @@
 **Status:** ✅ T1–T11 complete (config, models, transform, local directory
 source, git repository source, Onyx client, CLI wiring, summary &
 polish, test hardening, build & README, and the `sard check` pre-flight
-command, §13). ⏳ T12 planned: the `sard ls` command (§14) — not yet
-implemented.
+command, §13). ⏳ T12–T13 planned: the `sard ls` command (§14) and the
+optional `--tag` metadata flag — not yet implemented.
 
 **Language:** Go (switched from Python, 2026-10 — motivation: a single static
 binary that needs no interpreter or virtualenv on the target machine). The
@@ -125,6 +125,8 @@ Options
   --max-depth N    Max directory depth below the source root
   --max-file-size  Skip files larger than N KiB (default 1024)
   --token          Git auth token for private repos (env GIT_TOKEN); injected as x-access-token in the HTTPS URL
+  --tag TAG        Add TAG to every document of the run as an Onyx metadata tag;
+                   repeatable (planned: T13)
   --dry-run        Print payloads to stdout; send nothing (needs no Onyx
                    credentials — see the T10 decision below)
   --limit N        Ingest at most N files (smoke-testing)
@@ -433,6 +435,11 @@ the `--id-base` / `SARD_ID_BASE` override when set, else the source's default
   - The kind prefix (`git` / `local`) keeps the two ID spaces disjoint.
 - **Intentionally omitted:** `chunk_count` (let Onyx compute), `primary_owners` /
   `secondary_owners`, `additional_info`, image sections.
+- **Planned metadata additions (not yet implemented):** `tags` — a
+  `list[string]` of user-supplied values from the repeatable `--tag`
+  flag, stamped on every document of the run (T13). Display metadata
+  only: it never enters the document-ID hash, so changing tags between
+  runs updates existing documents instead of minting new IDs (R5).
 - **Content:** raw Markdown text in a single section. v2 candidate: split into sections per
   top-level heading (better citations/links) — noted as a future task, not planned now.
 - Frontmatter (YAML at top of `.mdx`/Jekyll files) is kept as-is in v1; stripping is a
@@ -730,6 +737,34 @@ Run with `go test ./...`.
       unchanged (config ≥ 90 %, transform 100 %, all ten
       URL-normalization functions 100 %; the onyx and cli packages are not
       gated).
+- **T13 — Optional `--tag` metadata (planned feature; resolves §11 #4)**
+  — a repeatable `--tag` flag on `sard ingest` that stamps
+  user-supplied values onto every document of the run as Onyx tags.
+  - **Flag**: repeatable (pflag `StringArray`, like `--include` /
+    `--exclude`); flag-only, no env var. An empty value (`--tag ""`)
+    is an invalid flag value (exit 2); any other value passes through
+    verbatim (no trimming, no de-duplication).
+  - **Metadata**: `metadata.tags = [tag, …]` — a `list[string]` value
+    (allowed by the Onyx schema, docs/onyx-ingestion-api.md) in flag
+    order, stamped on every document of the run; the key is absent
+    entirely when the flag is unused (no empty-list noise in the UI).
+  - **ID invariant**: tags are display metadata only — the document ID
+    (`sha256(kind + idBase + relpath)`, §6) never includes them, so
+    adding, removing, or changing tags between runs *updates* the same
+    documents instead of minting new ones (R5).
+  - **Implementation**: `ToOnyxPayload` gains a trailing
+    `tags []string` parameter (the CLI passes the flag value in both
+    `runDry` and `ingestAll`, so `--dry-run` payloads show the key);
+    the `ingest` command gains the flag row (§4).
+  - Accept: `go test ./...` green. Transform: with tags →
+    `metadata.tags` equals the given list, order preserved; without →
+    key absent; the same file with different or no tags → identical
+    document ID (and an identical payload apart from `tags`). CLI:
+    `--dry-run` with `--tag a --tag b` prints `"tags":["a","b"]` in
+    every payload; `--tag ""` → exit 2 with an actionable message;
+    `--help` gains exactly one `--tag` row; the existing
+    ingest / dry-run / check / ls suites pass unmodified. The README's
+    Configuration section documents the flag.
 
 ---
 
@@ -740,7 +775,7 @@ Run with `go test ./...`.
 | 1 | **Stale documents**: Ingestion API has no delete → removed files persist in Onyx. | Accept for v1; document clearly; future: Onyx document-deletion API or periodic full prune if one exists. |
 | 2 | **CC-pair prerequisite**: user must create a Connector (e.g. a File Connector) in the Admin Panel and read the `cc_pair_id` from the URL. | Documented — the README's Getting started carries the step-by-step walkthrough (T10); the prerequisite itself stays user-side. |
 | 3 | **Cloud rate limits** on `cloud.onyx.app` for bulk ingests. | Sequential + backoff on 429; `--limit` for chunked runs. |
-| 4 | **Tags**: `metadata` values become Onyx tags; free-form values may be noise in UI. | Keep metadata conservative (repo, path, commit); tags via future `--tag` flag. |
+| 4 | **Tags**: `metadata` values become Onyx tags; free-form values may be noise in UI. | Metadata stays conservative by default; optional user tags via the repeatable `--tag` flag (T13, §10). |
 | 5 | **Branch/tag targeting**: `--branch` covers branches; tags are a small extension (git handles both in `--branch`). | Support via `--branch` (git accepts refs). |
 | 6 | **Private repos without token in URL**: some users put the token in the URL itself. | Support `--token` injection; also pass through URLs that already embed a token. |
 | 7 | **`source` enum for non-GitHub/GitLab hosts** (Bitbucket, self-hosted Gitea). | Default `file`; `--source` override available. |
