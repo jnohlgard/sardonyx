@@ -361,6 +361,10 @@ are a configuration error (exit code 2), detected pre-flight.
 ### 5.3 Local directory source
 
 - Validate the path exists and is a directory (else config error, exit code 2).
+  An explicit path (absolute, or `./`/`../` prefixed) is never treated as a
+  repository input: an existing *file* (e.g. `./notes.md`) is rejected with a
+  "not a directory" config error — no clone is attempted — and so is a
+  missing path.
 - If the directory (or an ancestor) is a git repo, discovery prefers `git ls-files` (tracked
   files only; the repo's own `.gitignore` is respected for free) and falls back to a warned
   `filepath.WalkDir` when git is unavailable or fails. The input type decides the kind:

@@ -420,30 +420,82 @@ func TestRunDryRunNoCredentials(t *testing.T) {
 func TestRunConfigurationErrors(t *testing.T) {
 	dir := fixtureDir(t)
 	badPath := filepath.Join(t.TempDir(), "nope")
+	// pathDir is the fixture for the path-like cases: an existing
+	// notes.md plus a docs/ subdirectory. The CWD is moved into it so
+	// the ./-prefixed sources resolve exactly as written
+	// (docs/PLAN.md §5.3).
+	pathDir := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(pathDir, "docs"), 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	for name, content := range map[string]string{
+		"notes.md":    "# Notes\n\nnote body\n",
+		"docs/sub.md": "# Sub\n\nsub body\n",
+	} {
+		p := filepath.Join(pathDir, filepath.FromSlash(name))
+		if err := os.WriteFile(p, []byte(content), 0o644); err != nil {
+			t.Fatalf("write: %v", err)
+		}
+	}
 	cases := []struct {
-		name string
-		args []string
+		name  string
+		args  []string
+		chdir string
 	}{
-		{"unknown subcommand", []string{"frobnicate", dir}},
-		{"no arguments", []string{}},
-		{"missing source", []string{"ingest"}},
-		{"unknown --source value", []string{"ingest", dir, "--source", "bitbucket"}},
-		{"negative --limit", []string{"ingest", dir, "--limit", "-1"}},
-		{"negative --cc-pair-id", []string{"ingest", dir, "--cc-pair-id", "-1"}},
-		{"non-int --cc-pair-id", []string{"ingest", dir, "--cc-pair-id", "abc"}},
-		{"invalid --log-level", []string{"ingest", dir, "--log-level", "loud"}},
-		{"unknown flag", []string{"ingest", dir, "--wat"}},
-		{"bad path", []string{"ingest", badPath}},
+		{name: "unknown subcommand", args: []string{"frobnicate", dir}},
+		{name: "no arguments", args: []string{}},
+		{name: "missing source", args: []string{"ingest"}},
+		{name: "unknown --source value", args: []string{"ingest", dir, "--source", "bitbucket"}},
+		{name: "negative --limit", args: []string{"ingest", dir, "--limit", "-1"}},
+		{name: "negative --cc-pair-id", args: []string{"ingest", dir, "--cc-pair-id", "-1"}},
+		{name: "non-int --cc-pair-id", args: []string{"ingest", dir, "--cc-pair-id", "abc"}},
+		{name: "invalid --log-level", args: []string{"ingest", dir, "--log-level", "loud"}},
+		{name: "unknown flag", args: []string{"ingest", dir, "--wat"}},
+		{name: "bad path", args: []string{"ingest", badPath}},
+		{name: "path-like existing file", args: []string{"ingest", "./notes.md", "--dry-run"}, chdir: pathDir},
+		{name: "path-like missing file", args: []string{"ingest", "./missing.md", "--dry-run"}, chdir: pathDir},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			setEnv(t, "test-key", "7", "")
+			if tc.chdir != "" {
+				t.Chdir(tc.chdir)
+			}
 			code, _, _ := runSard(t, tc.args...)
 			if code != 2 {
 				t.Fatalf("exit = %d, want 2", code)
 			}
 		})
 	}
+
+	t.Run("path-like existing file message", func(t *testing.T) {
+		setEnv(t, "test-key", "7", "")
+		t.Chdir(pathDir)
+		code, out, errOut := runSard(t, "ingest", "./notes.md", "--dry-run", "--log-level", "error")
+		if code != 2 {
+			t.Fatalf("exit = %d, want 2", code)
+		}
+		// Quote-free fragment of the msg (the TextHandler escapes the
+		// source's quotes); lineContaining does the match.
+		if line := lineContaining(string(errOut), "not a directory — point sard at the directory"); line == "" {
+			t.Errorf("stderr = %q, want a not-a-directory configuration error", errOut)
+		}
+		if len(out) != 0 {
+			t.Errorf("stdout = %q, want empty", out)
+		}
+	})
+
+	t.Run("path-like subdirectory is a local source", func(t *testing.T) {
+		setEnv(t, "test-key", "7", "")
+		t.Chdir(pathDir)
+		code, out, _ := runSard(t, "ingest", "./docs", "--dry-run", "--log-level", "error")
+		if code != 0 {
+			t.Fatalf("exit = %d, want 0", code)
+		}
+		if n := len(nonEmptyLines(string(out))); n != 1 {
+			t.Errorf("stdout payload lines = %d, want 1 (docs/sub.md)", n)
+		}
+	})
 }
 
 // TestRunZeroFiles: an empty directory finds no Markdown files — a

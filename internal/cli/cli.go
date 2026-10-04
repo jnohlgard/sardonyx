@@ -631,9 +631,11 @@ func validate(p *ingestFlags) error {
 
 // pathLike reports whether s is written as an explicit filesystem path
 // (absolute, or with a ./ or ../ prefix) rather than a repository URL or
-// owner/repo shorthand. A non-existent path-like input is a bad path
-// (exit 2); a bare two-segment string is the owner/repo shorthand and
-// fails, if at all, at clone time (exit 1).
+// owner/repo shorthand. A path-like input that doesn't name an existing
+// directory — a missing path, or an existing file such as ./notes.md —
+// is a configuration error (exit 2), never a clone; a bare two-segment
+// string without a path prefix is the owner/repo shorthand and fails,
+// if at all, at clone time (exit 1).
 func pathLike(s string) bool {
 	if strings.Contains(s, "://") || strings.Contains(s, "@") {
 		return false
@@ -674,7 +676,8 @@ type discovery struct {
 // (config.ErrConfiguration, exit 2); a clone failure, a missing git
 // binary, and the like are runtime errors (exit 1).
 func discover(src string, p *ingestFlags, settings *config.Settings, log *slog.Logger) (*discovery, error) {
-	if fi, err := os.Stat(src); err == nil && fi.IsDir() {
+	fi, statErr := os.Stat(src)
+	if statErr == nil && fi.IsDir() {
 		if p.branch != "" {
 			log.Warn("--branch applies to git sources only; ignoring it for a local directory")
 		}
@@ -698,9 +701,16 @@ func discover(src string, p *ingestFlags, settings *config.Settings, log *slog.L
 		}, nil
 	}
 
-	// Not a directory: a git repository input. A non-existent explicit
-	// path is a bad path (exit 2), not a repository shorthand.
-	if _, err := os.Stat(src); err != nil && pathLike(src) {
+	// Not a directory: a git repository input, unless the source is
+	// written as an explicit filesystem path — absolute, or with a ./
+	// or ../ prefix. A path-like input is never a repository shorthand:
+	// an existing file (e.g. ./notes.md) is a mis-pointed source, a
+	// missing one a bad path — both are configuration errors (exit 2),
+	// not a clone attempt.
+	if pathLike(src) {
+		if statErr == nil {
+			return nil, configErrorf("invalid source %q: not a directory — point sard at the directory containing the Markdown files", src)
+		}
 		return nil, configErrorf("invalid source %q: not an existing directory and not a git repository URL", src)
 	}
 
