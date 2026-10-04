@@ -46,6 +46,20 @@
 // a 401/403) so the CLI can map them to exit codes 1 / 2 (2 / 2); the
 // NewClient ccPairID argument is what probe 3 queries.
 //
+// ListDocs is the sard ls data source (docs/PLAN.md §14): a single
+// read-only GET /onyx-api/ingestion — the read-only sibling of the
+// POST a real run uses — under the same 10 s probe deadline and
+// Bearer auth. It returns the documents the key can see
+// (document_id, semantic_id, link) in server order; a 200 whose body
+// is neither a bare array nor a {data: [...]} envelope is an error
+// (carrying the body excerpt), never a silent empty list. 401/403
+// fail fast via ErrAuth; 404/405 and any other 4xx are terminal via
+// ErrNoIngestionAPI (no POST fallback — a POST cannot produce a
+// list); 429, 5xx, and connection/timeout errors retry with the
+// shared backoff, exhausted into ErrUnreachable. The exit-code
+// signals: ErrUnreachable → 1 (including the malformed-200 case),
+// ErrAuth / ErrNoIngestionAPI → 2, the context's error → 130.
+//
 // The API key is never logged or included in error text or reasons.
 package onyx
 
