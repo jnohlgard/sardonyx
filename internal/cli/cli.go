@@ -5,12 +5,15 @@
 // config resolution, source discovery, transform, ingestion, and the
 // final summary (docs/PLAN.md §3, §4; task T7) — plus the `sard check`
 // pre-flight subcommand (docs/PLAN.md §13; task T11b), which verifies
-// the environment a real run needs without creating any document.
+// the environment a real run needs without creating any document, and
+// the `sard ls` subcommand (docs/PLAN.md §14; task T12b), which lists
+// the documents the API key can see without creating, updating, or
+// deleting anything.
 //
 // Run is the single entry point used by cmd/sard. It builds the cobra
-// command tree — the root `sard` command and the `ingest` and `check`
-// subcommands, "sard ingest <source> [options]" and "sard check
-// [options]" — and executes it. The flag
+// command tree — the root `sard` command and the `ingest`, `check`,
+// and `ls` subcommands, "sard ingest <source> [options]", "sard check
+// [options]", and "sard ls [options]" — and executes it. The flag
 // definitions on the ingest command are the single source of truth for
 // the --help output: cobra renders the usage line and the option list
 // from the same definitions that bind the parsed values, so the two
@@ -32,6 +35,11 @@
 // with DryRun: false (exactly the required-credentials set of a real
 // run; that is the point of the command) — and then runs
 // onyx.Client.Check under signal.NotifyContext (docs/PLAN.md §13.6).
+// The ls command's RunE (runLs) is the same shape minus the cc-pair
+// validation: build logger, resolve configuration with CCPairOptional:
+// true (ls needs only the API key, §14.3.1), run onyx.Client.ListDocs
+// under signal.NotifyContext, print the list to stdout and the summary
+// (or the empty-list warning) to stderr (docs/PLAN.md §14.5).
 //
 // --help prints the auto-generated usage to stdout and exits 0 (cobra's
 // convention); the root's --version flag prints the build-stamped
@@ -82,6 +90,27 @@
 // Like ingest, check prints everything to stderr — one line per probe,
 // then a summary header on success, or a single actionable error line
 // on failure — and stdout stays empty.
+//
+// sard ls (docs/PLAN.md §14) maps its own exit codes:
+//
+//   - 0 — the list was retrieved — including an empty list (a warning
+//     is logged instead of a summary).
+//   - 1 — the server is unreachable (a connection failure/timeout after
+//     retries, or a persistent 429/5xx) — or a 200 whose body is
+//     neither a bare array nor a {data: [...]} envelope (malformed
+//     response).
+//   - 2 — a configuration error (missing/invalid ONYX_API_KEY, an
+//     invalid --log-level) — or a rejected key (401/403: the same
+//     classification as the ingest fail-fast and check) — or the GET
+//     /onyx-api/ingestion endpoint unavailable at the configured URL
+//     (404/405/other 4xx).
+//   - 130 — interrupted (Ctrl-C).
+//
+// Unlike ingest and check, ls writes the list itself to stdout — one
+// "<document_id>\t<semantic_id>" line per document (a third,
+// tab-separated link field only when non-empty), in the order the
+// server returned it; the summary (or the empty-list warning) and all
+// diagnostics go to stderr (the §8 discipline).
 //
 // --dry-run never exits 1 (it sends nothing, so no file can fail); a
 // discovery error in dry-run still exits 2. A dry run needs no Onyx
@@ -357,6 +386,101 @@ problem; 130 interrupted.`,
 	return cmd
 }
 
+// lsFlags holds the parsed state of one `sard ls` invocation
+// (docs/PLAN.md §14.1). It is separate from ingestFlags and checkFlags
+// on purpose: ls has exactly three flags — no cc-pair id (the endpoint
+// is key-scoped, §14.3.1) and no source/git/include/limit/dry-run
+// flags (there is no discovery).
+type lsFlags struct {
+	apiURL   string
+	apiKey   string
+	logLevel string
+}
+
+// lsUsageTemplate is checkUsageTemplate with an Environment section
+// listing exactly the two Onyx variables behind its flags — no
+// ONYX_CC_PAIR_ID, since ls takes no cc-pair id.
+// TestLsUsageTemplateEnvNames guards the names. It is set explicitly
+// on the ls command because a command inherits its parent's usage
+// template (the root uses rootUsageTemplate, without a UseLine); keep
+// the default part in sync with the cobra version pinned in go.mod.
+const lsUsageTemplate = `Usage:{{if .Runnable}}
+  {{.UseLine}}
+
+Environment:
+  ONYX_API_URL     Onyx API base URL (--api-url)
+  ONYX_API_KEY     Onyx API key (--api-key){{end}}{{if .HasAvailableSubCommands}}
+  {{.CommandPath}} [command]{{end}}{{if gt (len .Aliases) 0}}
+
+Aliases:
+  {{.NameAndAliases}}{{end}}{{if .HasExample}}
+
+Examples:
+{{.Example}}{{end}}{{if .HasAvailableSubCommands}}{{$cmds := .Commands}}{{if eq (len .Groups) 0}}
+
+Available Commands:{{range $cmds}}{{if (or .IsAvailableCommand (eq .Name "help"))}}
+  {{rpad .Name .NamePadding }} {{.Short}}{{end}}{{end}}{{else}}{{range $group := .Groups}}
+
+{{.Title}}{{range $cmds}}{{if (and (eq .GroupID $group.ID) (or .IsAvailableCommand (eq .Name "help")))}}
+  {{rpad .Name .NamePadding }} {{.Short}}{{end}}{{end}}{{end}}{{if not .AllChildCommandsHaveGroup}}
+
+Additional Commands:{{range $cmds}}{{if (and (eq .GroupID "") (or .IsAvailableCommand (eq .Name "help")))}}
+  {{rpad .Name .NamePadding }} {{.Short}}{{end}}{{end}}{{end}}{{end}}{{end}}{{if .HasAvailableLocalFlags}}
+
+Flags:
+{{.LocalFlags.FlagUsages | trimTrailingWhitespaces}}{{end}}{{if .HasAvailableInheritedFlags}}
+
+Global Flags:
+{{.InheritedFlags.FlagUsages | trimTrailingWhitespaces}}{{end}}{{if .HasHelpSubCommands}}
+
+Additional help topics:{{range .Commands}}{{if .IsAdditionalHelpTopicCommand}}
+  {{rpad .CommandPath .CommandPathPadding}} {{.Short}}{{end}}{{end}}{{end}}{{if .HasAvailableSubCommands}}
+
+Use "{{.CommandPath}} [command] --help" for more information about a command.{{end}}
+`
+
+// newLsCmd builds the `sard ls` subcommand (docs/PLAN.md §14): the
+// three flags bound to p and a RunE wired to runLs. The flag
+// definitions are the single source of truth for the --help output,
+// exactly as for ingest and check: cobra renders the usage line and
+// the option list from the same definitions that bind the parsed
+// values. The Long text is a summary; there is no Arguments section
+// because ls takes no positional argument (cobra.NoArgs).
+func newLsCmd(p *lsFlags) *cobra.Command {
+	cmd := &cobra.Command{
+		Use:   "ls",
+		Short: "List the documents the API key can see (read-only)",
+		Long: `Lists the documents the configured API key can see on the Onyx
+deployment — the documents previous sard ingest runs created or
+updated — via the read-only GET /onyx-api/ingestion sibling of the
+Ingestion POST.
+
+It is read-only: it creates, updates, and deletes nothing, and it
+needs only the API key (no cc-pair id). The list goes to stdout — one
+line per document, "<document_id><TAB><semantic_id>" and a third
+tab-separated link field only when the document has one — in the
+order the server returns it; the summary goes to stderr. Exit codes:
+0 list retrieved (an empty list exits 0 with a warning); 1 server
+unreachable or a malformed list response; 2 configuration,
+credentials, or endpoint problem; 130 interrupted.`,
+		Args:          cobra.NoArgs,
+		SilenceErrors: true,
+		SilenceUsage:  true,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			if code := runLs(p); code != 0 {
+				return exitCode(code)
+			}
+			return nil
+		},
+	}
+	cmd.SetUsageTemplate(lsUsageTemplate)
+	f := cmd.Flags()
+	f.StringVar(&p.apiURL, "api-url", "", "Onyx API base URL (default: "+config.DefaultAPIURL+"; env: "+config.EnvAPIURL+")")
+	f.StringVar(&p.apiKey, "api-key", "", "Onyx API key (env: "+config.EnvAPIKey+")")
+	f.StringVar(&p.logLevel, "log-level", "info", "log level: debug | info | warning | error")
+	return cmd
+}
+
 // Version is the running binary's version, printed by the root
 // command's --version flag (`sard version <Version>` on stdout, exit
 // 0). cmd/sard assigns it from the build-time main.version stamp
@@ -386,7 +510,11 @@ sard check is the pre-flight for the first real run: it verifies the
 Onyx environment (server reachability, the API key's ingestion
 permission, and the configured cc-pair's existence) without creating,
 updating, or deleting any document — when it exits 0, the run cannot
-fail on an environmental problem.`,
+fail on an environmental problem.
+
+sard ls is read-only: it lists the documents the API key can see on
+the deployment — the documents previous sard ingest runs created or
+updated — one per line on stdout, and it needs only the API key.`,
 		SilenceErrors: true,
 		SilenceUsage:  true,
 		RunE:          func(cmd *cobra.Command, args []string) error { return errNoSubcommand },
@@ -606,19 +734,20 @@ func discover(src string, p *ingestFlags, settings *config.Settings, log *slog.L
 
 // Run executes one `sard` invocation and returns the exit code per
 // docs/PLAN.md §8 (see the package doc). It builds the cobra command
-// tree (root `sard` + the `ingest` and `check` subcommands), executes
-// it, and maps the outcome: --help (and the built-in help command)
-// printed usage and exit 0; the pipeline's own exit code (0/1/2/130,
-// all diagnostics logged by the pipeline itself); a missing or unknown
-// subcommand, and any flag/argument error on `sard ingest` or
-// `sard check`, exit 2 with the relevant usage on stderr (the
-// auto-generated top-level usage for root-level problems, the
+// tree (root `sard` + the `ingest`, `check`, and `ls` subcommands),
+// executes it, and maps the outcome: --help (and the built-in help
+// command) printed usage and exit 0; the pipeline's own exit code
+// (0/1/2/130, all diagnostics logged by the pipeline itself); a missing
+// or unknown subcommand, and any flag/argument error on `sard ingest`,
+// `sard check`, or `sard ls`, exit 2 with the relevant usage on stderr
+// (the auto-generated top-level usage for root-level problems, the
 // subcommand usage for subcommand-level ones). cmd/sard only maps the
 // returned code to os.Exit.
 func Run(args []string) int {
 	root := newRootCmd()
 	root.AddCommand(newIngestCmd(&ingestFlags{}))
 	root.AddCommand(newCheckCmd(&checkFlags{}))
+	root.AddCommand(newLsCmd(&lsFlags{}))
 	root.SetArgs(args)
 
 	cmd, err := root.ExecuteC()
@@ -835,6 +964,68 @@ func printCheckReport(res onyx.CheckResult, settings *config.Settings, elapsed t
 		ccState = "cc-pair unverified (warning)"
 	}
 	log.Info(fmt.Sprintf("check complete: reachable, key ok, %s in %s", ccState, elapsed))
+}
+
+// runLs runs the list for one `sard ls` invocation and returns the
+// exit code per docs/PLAN.md §14.4 (see the package doc): build the
+// logger from --log-level, resolve configuration with CCPairOptional:
+// true (ls needs only the API key — a set cc-pair value is still
+// validated and picked up, §14.3.1), run the single GET under a
+// signal-aware context, then print the list to stdout and the summary
+// (or the empty-list warning) to stderr. A failed list prints no
+// summary: a single actionable error line, then the exit code (the
+// same shape as the ingest auth fail-fast and the failed check).
+func runLs(p *lsFlags) int {
+	log, err := buildLogger(p.logLevel)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "error: %v\n", err)
+		return 2
+	}
+	settings, err := config.Resolve(config.Flags{
+		APIURL:         p.apiURL,
+		APIKey:         p.apiKey,
+		CCPairOptional: true,
+	})
+	if err != nil {
+		log.Error(err.Error())
+		return 2
+	}
+
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
+	defer stop()
+
+	start := time.Now()
+	client := onyx.NewClient(settings.APIURL, settings.APIKey, 0) // the GET carries no cc-pair
+	docs, err := client.ListDocs(ctx)
+	if err != nil {
+		if ctx.Err() != nil {
+			log.Warn("ls interrupted (Ctrl-C)")
+			return 130
+		}
+		log.Error(err.Error())
+		if errors.Is(err, onyx.ErrUnreachable) {
+			return 1 // unreachable, or a malformed 200 body
+		}
+		return 2 // ErrAuth or ErrNoIngestionAPI
+	}
+
+	// The list itself goes to stdout — one line per document, in the
+	// order the server returned it; the link field only when non-empty
+	// (docs/PLAN.md §14.3).
+	for _, d := range docs {
+		if d.Link != "" {
+			fmt.Fprintf(os.Stdout, "%s\t%s\t%s\n", d.DocumentID, d.SemanticID, d.Link)
+		} else {
+			fmt.Fprintf(os.Stdout, "%s\t%s\n", d.DocumentID, d.SemanticID)
+		}
+	}
+
+	if len(docs) == 0 {
+		log.Warn("no documents visible to this API key — nothing has been ingested yet (or the key's scope is empty)")
+		return 0
+	}
+	log.Info(fmt.Sprintf("ls: %d %s in %s", len(docs), plural(len(docs), "document"), time.Since(start)))
+	return 0
 }
 
 // ccPairLine renders the cc-pair probe's report line

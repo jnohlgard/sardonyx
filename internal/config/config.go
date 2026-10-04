@@ -55,6 +55,15 @@ type Flags struct {
 	// Onyx credentials (API key, cc-pair id) are not required for it
 	// (docs/PLAN.md §4).
 	DryRun bool
+	// CCPairOptional marks an invocation that needs no cc-pair id:
+	// sard ls's GET /onyx-api/ingestion endpoint is key-scoped and
+	// takes no cc-pair argument (docs/PLAN.md §14.3.1). When set, the
+	// "ONYX_CC_PAIR_ID is required" problem is skipped; a set cc-pair
+	// value is still validated as an integer and picked up into
+	// Settings via the normal flag > env > .env precedence (it simply
+	// goes unused by ls). The API key is still required, and the
+	// DryRun behavior is unchanged.
+	CCPairOptional bool
 }
 
 // ErrConfiguration is the sentinel for configuration failures (a required
@@ -92,7 +101,9 @@ func IsConfigurationError(err error) bool {
 // pre-flight. An empty environment variable is treated as unset, so a .env
 // value still applies. A missing .env file is not an error. A dry run
 // (Flags.DryRun) sends nothing, so the Onyx credentials are not required
-// for it. It returns an *Error wrapping ErrConfiguration when a required
+// for it; likewise Flags.CCPairOptional (sard ls, docs/PLAN.md §14.3.1)
+// needs no cc-pair id — a set cc-pair value is still validated and picked
+// up. It returns an *Error wrapping ErrConfiguration when a required
 // value is missing or invalid.
 func Resolve(flags Flags) (*Settings, error) {
 	dotEnv, err := loadDotEnv(".env")
@@ -123,7 +134,7 @@ func Resolve(flags Flags) (*Settings, error) {
 		problems = append(problems, requiredProblem(EnvAPIKey, "--api-key"))
 	}
 	if ccPairIDStr == "" {
-		if !flags.DryRun {
+		if !flags.DryRun && !flags.CCPairOptional {
 			problems = append(problems, requiredProblem(EnvCCPairID, "--cc-pair-id"))
 		}
 	} else if _, err := strconv.Atoi(ccPairIDStr); err != nil {

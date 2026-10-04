@@ -277,6 +277,83 @@ func TestDryRunDoesNotRequireCredentials(t *testing.T) {
 	})
 }
 
+// TestCCPairOptional covers the sard ls case (docs/PLAN.md §14.3.1):
+// with CCPairOptional set, the "ONYX_CC_PAIR_ID is required" problem is
+// skipped — everything else is unchanged (the API key is still
+// required; a set cc-pair value is still validated and picked up).
+func TestCCPairOptional(t *testing.T) {
+	run := func(t *testing.T, env map[string]string, flags Flags) (*Settings, error) {
+		t.Helper()
+		return ResolveWith(t, env, flags)
+	}
+
+	t.Run("no cc-pair id anywhere resolves with zero", func(t *testing.T) {
+		got, err := run(t, map[string]string{EnvAPIKey: "some-key"}, Flags{CCPairOptional: true})
+		if err != nil {
+			t.Fatalf("Resolve: %v", err)
+		}
+		if got.CCPairID != 0 {
+			t.Fatalf("CCPairID = %d, want 0", got.CCPairID)
+		}
+	})
+
+	t.Run("a set env cc-pair id is still validated and picked up", func(t *testing.T) {
+		got, err := run(t, map[string]string{EnvAPIKey: "some-key", EnvCCPairID: "42"}, Flags{CCPairOptional: true})
+		if err != nil {
+			t.Fatalf("Resolve: %v", err)
+		}
+		if got.CCPairID != 42 {
+			t.Fatalf("CCPairID = %d, want 42 (picked up even when optional)", got.CCPairID)
+		}
+	})
+
+	t.Run("a flag cc-pair id still beats env", func(t *testing.T) {
+		got, err := run(t, map[string]string{EnvAPIKey: "some-key", EnvCCPairID: "42"}, Flags{CCPairID: 7, CCPairOptional: true})
+		if err != nil {
+			t.Fatalf("Resolve: %v", err)
+		}
+		if got.CCPairID != 7 {
+			t.Fatalf("CCPairID = %d, want 7 (flag precedence unchanged)", got.CCPairID)
+		}
+	})
+
+	t.Run("a non-integer env cc-pair id still errors", func(t *testing.T) {
+		_, err := run(t, map[string]string{EnvAPIKey: "some-key", EnvCCPairID: "notanint"}, Flags{CCPairOptional: true})
+		if err == nil {
+			t.Fatal("expected an error, got nil")
+		}
+		if !strings.Contains(err.Error(), EnvCCPairID) || !strings.Contains(err.Error(), "integer") {
+			t.Errorf("error %q does not describe the invalid %s", err, EnvCCPairID)
+		}
+	})
+
+	t.Run("the API key is still required", func(t *testing.T) {
+		_, err := run(t, nil, Flags{CCPairOptional: true})
+		if err == nil {
+			t.Fatal("expected an error, got nil")
+		}
+		if !IsConfigurationError(err) {
+			t.Fatalf("IsConfigurationError(%v) = false, want true", err)
+		}
+		if !strings.Contains(err.Error(), EnvAPIKey) {
+			t.Errorf("error %q does not name %s", err, EnvAPIKey)
+		}
+		if strings.Contains(err.Error(), EnvCCPairID) {
+			t.Errorf("error %q unexpectedly names %s (optional here)", err, EnvCCPairID)
+		}
+	})
+
+	t.Run("without the flag the cc-pair id is still required", func(t *testing.T) {
+		_, err := run(t, map[string]string{EnvAPIKey: "some-key"}, Flags{})
+		if err == nil {
+			t.Fatal("expected an error, got nil")
+		}
+		if !strings.Contains(err.Error(), EnvCCPairID) {
+			t.Errorf("error %q does not name %s", err, EnvCCPairID)
+		}
+	})
+}
+
 // ResolveWith runs Resolve with the given env values in a fresh temp
 // directory (no .env file can leak in) and returns the Settings.
 func ResolveWith(t *testing.T, env map[string]string, flags Flags) (*Settings, error) {

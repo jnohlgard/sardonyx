@@ -1,9 +1,10 @@
 // Copyright (C) 2026 Joakim Nohlgård
 // SPDX-License-Identifier: AGPL-3.0
 
-// End-to-end smoke tests for the CLI (docs/PLAN.md §10, T7 and T11b).
-// They invoke Run — the same entry function cmd/sard uses — with a
-// temp-dir fixture and a mock Onyx server (net/http/httptest; stdlib only).
+// End-to-end smoke tests for the CLI (docs/PLAN.md §10, T7, T11b, and
+// T12b). They invoke Run — the same entry function cmd/sard uses — with
+// a temp-dir fixture and a mock Onyx server (net/http/httptest; stdlib
+// only).
 package cli
 
 import (
@@ -1382,8 +1383,362 @@ func TestCheckUsageTemplateEnvNames(t *testing.T) {
 	}
 }
 
+// lsDocsServer serves the two-document list for the GET endpoint
+// (everything else 404): the first document has no link, the second
+// does — in that server order.
+func lsDocsServer(t *testing.T) *mockCheck {
+	t.Helper()
+	return newMockCheck(t, func(method, path string, n int) (int, string) {
+		if method == http.MethodGet && path == "/onyx-api/ingestion" {
+			return 200, `[{"document_id":"d1","semantic_id":"a.md","link":null},{"document_id":"d2","semantic_id":"b.md","link":"https://example.com/b.md"}]`
+		}
+		return 404, `{"detail":"not found"}`
+	})
+}
+
+// TestRunLsHappy: a healthy environment exits 0 — stdout carries
+// strictly one line per document, in server order ("<document_id>\t
+// <semantic_id>" plus a tab-separated link field only when non-empty),
+// the "ls: N documents in …" summary goes to stderr, and the server
+// received exactly one GET with the Bearer key (docs/PLAN.md §14.3,
+// §14.4). No cc-pair id is configured — ls needs only the key.
+func TestRunLsHappy(t *testing.T) {
+	setEnv(t, "test-ls-key", "", "")
+	mock := lsDocsServer(t)
+
+	code, out, stderr := runSard(t, "ls", "--api-url", mock.ts.URL, "--log-level", "info")
+	if code != 0 {
+		t.Fatalf("exit = %d, want 0; stderr:\n%s", code, stderr)
+	}
+	want := "d1\ta.md\nd2\tb.md\thttps://example.com/b.md\n"
+	if string(out) != want {
+		t.Fatalf("stdout = %q, want %q", out, want)
+	}
+	if got := mock.count(http.MethodGet, "/onyx-api/ingestion"); got != 1 {
+		t.Errorf("GET /onyx-api/ingestion requests = %d, want 1", got)
+	}
+	if got := len(mock.all()); got != 1 {
+		t.Errorf("total requests = %d, want 1 (read-only: one GET, nothing else)", got)
+	}
+	for _, r := range mock.all() {
+		if r.Auth != "Bearer test-ls-key" {
+			t.Errorf("%s %s Authorization = %q, want Bearer test-ls-key", r.Method, r.Path, r.Auth)
+		}
+	}
+	stderrS := string(stderr)
+	header := lineContaining(stderrS, "ls: 2 documents in")
+	if header == "" {
+		t.Fatalf("no summary line; stderr:\n%s", stderrS)
+	}
+	assertElapsed(t, header)
+}
+
+// TestRunLsEmpty: an empty list exits 0 with a warning instead of the
+// summary, and an empty stdout (docs/PLAN.md §14.3).
+func TestRunLsEmpty(t *testing.T) {
+	setEnv(t, "test-ls-key", "", "")
+	mock := newMockCheck(t, func(method, path string, n int) (int, string) {
+		if method == http.MethodGet && path == "/onyx-api/ingestion" {
+			return 200, `[]`
+		}
+		return 404, `{"detail":"not found"}`
+	})
+
+	code, out, stderr := runSard(t, "ls", "--api-url", mock.ts.URL, "--log-level", "info")
+	if code != 0 {
+		t.Fatalf("exit = %d, want 0 (an empty list is not an error); stderr:\n%s", code, stderr)
+	}
+	if len(out) != 0 {
+		t.Fatalf("stdout is not empty: %q", out)
+	}
+	if line := lineContaining(string(stderr), "no documents visible to this API key"); line == "" {
+		t.Fatalf("no empty-list warning; stderr:\n%s", stderr)
+	}
+	if line := lineContaining(string(stderr), "ls: 0 documents"); line != "" {
+		t.Fatalf("an empty list must warn, not summarize: %q", line)
+	}
+}
+
+// TestRunLsFailures: every exit-2 case of sard ls (docs/PLAN.md
+// §14.4): missing API key, an invalid --log-level, a 401, a 403, and
+// a 404 (the message names the endpoint and the URL, never the key).
+func TestRunLsFailures(t *testing.T) {
+	t.Run("missing API key", func(t *testing.T) {
+		setEnv(t, "", "", "")
+		mock := lsDocsServer(t)
+		code, _, stderr := runSard(t, "ls", "--api-url", mock.ts.URL, "--log-level", "info")
+		if code != 2 {
+			t.Fatalf("exit = %d, want 2; stderr:\n%s", code, stderr)
+		}
+		if got := len(mock.all()); got != 0 {
+			t.Errorf("%d requests, want 0 (a pre-flight error sends nothing)", got)
+		}
+		if line := lineContaining(string(stderr), "ONYX_API_KEY is required"); line == "" {
+			t.Fatalf("no actionable error line; stderr:\n%s", stderr)
+		}
+	})
+	t.Run("invalid log-level", func(t *testing.T) {
+		setEnv(t, "test-ls-key", "", "")
+		code, _, stderr := runSard(t, "ls", "--log-level", "loud")
+		if code != 2 {
+			t.Fatalf("exit = %d, want 2; stderr:\n%s", code, stderr)
+		}
+		if line := lineContaining(string(stderr), "invalid --log-level"); line == "" {
+			t.Fatalf("no actionable error line; stderr:\n%s", stderr)
+		}
+	})
+	t.Run("401", func(t *testing.T) {
+		const key = "super-secret-ls-key-12345"
+		setEnv(t, key, "", "")
+		mock := newMockCheck(t, func(method, path string, n int) (int, string) {
+			if method == http.MethodGet && path == "/onyx-api/ingestion" {
+				return 401, `{"detail":"invalid token"}`
+			}
+			return 404, `{"detail":"not found"}`
+		})
+		code, _, stderr := runSard(t, "ls", "--api-url", mock.ts.URL, "--log-level", "info")
+		if code != 2 {
+			t.Fatalf("exit = %d, want 2; stderr:\n%s", code, stderr)
+		}
+		if got := mock.count(http.MethodGet, "/onyx-api/ingestion"); got != 1 {
+			t.Errorf("GET requests = %d, want 1 (a 401 is not retried)", got)
+		}
+		stderrS := string(stderr)
+		for _, want := range []string{"ONYX_API_KEY", "manage:connectors"} {
+			if !strings.Contains(stderrS, want) {
+				t.Errorf("error line does not mention %q; stderr:\n%s", want, stderrS)
+			}
+		}
+		if strings.Contains(stderrS, key) {
+			t.Fatalf("the API key leaked into the output; stderr:\n%s", stderrS)
+		}
+	})
+	t.Run("403", func(t *testing.T) {
+		const key = "super-secret-ls-key-12345"
+		setEnv(t, key, "", "")
+		mock := newMockCheck(t, func(method, path string, n int) (int, string) {
+			if method == http.MethodGet && path == "/onyx-api/ingestion" {
+				return 403, `{"detail":"forbidden"}`
+			}
+			return 404, `{"detail":"not found"}`
+		})
+		code, _, stderr := runSard(t, "ls", "--api-url", mock.ts.URL, "--log-level", "info")
+		if code != 2 {
+			t.Fatalf("exit = %d, want 2; stderr:\n%s", code, stderr)
+		}
+		if got := mock.count(http.MethodGet, "/onyx-api/ingestion"); got != 1 {
+			t.Errorf("GET requests = %d, want 1 (a 403 is not retried)", got)
+		}
+		if strings.Contains(string(stderr), key) {
+			t.Fatalf("the API key leaked into the output; stderr:\n%s", stderr)
+		}
+	})
+	t.Run("404 endpoint unavailable", func(t *testing.T) {
+		const key = "super-secret-ls-key-12345"
+		setEnv(t, key, "", "")
+		mock := newMockCheck(t, func(method, path string, n int) (int, string) {
+			return 404, `{"detail":"not found"}`
+		})
+		code, _, stderr := runSard(t, "ls", "--api-url", mock.ts.URL, "--log-level", "info")
+		if code != 2 {
+			t.Fatalf("exit = %d, want 2; stderr:\n%s", code, stderr)
+		}
+		if got := mock.count(http.MethodGet, "/onyx-api/ingestion"); got != 1 {
+			t.Errorf("GET requests = %d, want 1 (a 404 is not retried)", got)
+		}
+		if got := mock.count(http.MethodPost, "/onyx-api/ingestion"); got != 0 {
+			t.Errorf("POST requests = %d, want 0 (ls has no POST fallback)", got)
+		}
+		stderrS := string(stderr)
+		for _, want := range []string{
+			"GET /onyx-api/ingestion is not available at " + mock.ts.URL,
+			"ONYX_API_URL",
+		} {
+			if !strings.Contains(stderrS, want) {
+				t.Errorf("error line does not mention %q; stderr:\n%s", want, stderrS)
+			}
+		}
+		if strings.Contains(stderrS, key) {
+			t.Fatalf("the API key leaked into the output; stderr:\n%s", stderrS)
+		}
+	})
+}
+
+// TestRunLsUnreachable: a dead port (a connection failure after
+// retries) and a persistent 429 both exit 1 (docs/PLAN.md §14.4). Each
+// subtest runs the production backoff (1 s + 4 s between the three
+// attempts — the CLI layer has no injection seam), so the test takes
+// about 10 s.
+func TestRunLsUnreachable(t *testing.T) {
+	t.Run("dead port", func(t *testing.T) {
+		setEnv(t, "test-ls-key", "", "")
+		l, err := net.Listen("tcp", "127.0.0.1:0")
+		if err != nil {
+			t.Fatal(err)
+		}
+		addr := l.Addr().String()
+		_ = l.Close() // port now refuses connections
+
+		code, _, stderr := runSard(t, "ls", "--api-url", "http://"+addr, "--log-level", "info")
+		if code != 1 {
+			t.Fatalf("exit = %d, want 1; stderr:\n%s", code, stderr)
+		}
+		if line := lineContaining(string(stderr), "unreachable"); line == "" {
+			t.Fatalf("no unreachable error line; stderr:\n%s", stderr)
+		}
+	})
+	t.Run("persistent 429", func(t *testing.T) {
+		setEnv(t, "test-ls-key", "", "")
+		mock := newMockCheck(t, func(method, path string, n int) (int, string) {
+			return 429, `{"detail":"rate limited"}`
+		})
+		code, _, stderr := runSard(t, "ls", "--api-url", mock.ts.URL, "--log-level", "info")
+		if code != 1 {
+			t.Fatalf("exit = %d, want 1; stderr:\n%s", code, stderr)
+		}
+		if got := mock.count(http.MethodGet, "/onyx-api/ingestion"); got != 3 {
+			t.Errorf("GET requests = %d, want 3 (retries exhausted)", got)
+		}
+		if line := lineContaining(string(stderr), "unreachable"); line == "" {
+			t.Fatalf("no unreachable error line; stderr:\n%s", stderr)
+		}
+	})
+}
+
+// TestRunLsInterrupted: SIGINT mid-list (a GET request held open)
+// cancels the request → exit 130 (docs/PLAN.md §14.4).
+func TestRunLsInterrupted(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("SIGINT semantics differ on Windows")
+	}
+	setEnv(t, "test-ls-key", "", "")
+	release := make(chan struct{})
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		select {
+		case <-release:
+			return
+		case <-r.Context().Done():
+			return
+		case <-time.After(30 * time.Second): // safety net: never hang a test
+			w.WriteHeader(200)
+			fmt.Fprint(w, `[]`)
+		}
+	}))
+	defer func() {
+		close(release)
+		ts.Close()
+	}()
+
+	time.AfterFunc(300*time.Millisecond, func() {
+		_ = syscall.Kill(os.Getpid(), syscall.SIGINT)
+	})
+
+	code, _, stderr := runSard(t, "ls", "--api-url", ts.URL, "--log-level", "info")
+	if code != 130 {
+		t.Fatalf("exit = %d, want 130; stderr:\n%s", code, stderr)
+	}
+}
+
+// TestRunLsHelp: sard ls --help exits 0 with exactly three flags
+// (api-url, api-key, log-level — no cc-pair-id and no
+// source/git/limit/dry-run/id-base flags) and an Environment section
+// naming exactly the two Onyx variables (docs/PLAN.md §14.1).
+func TestRunLsHelp(t *testing.T) {
+	setEnv(t, "", "", "")
+	code, out, errOut := runSard(t, "ls", "--help")
+	if code != 0 {
+		t.Fatalf("exit = %d, want 0; stderr: %s", code, errOut)
+	}
+	if len(errOut) != 0 {
+		t.Fatalf("stderr is not empty: %q", errOut)
+	}
+	s := string(out)
+
+	// The Flags section (between "Flags:" and the next section or end;
+	// ls's help ends with Flags, so the after-part is the section).
+	_, flagsSection, ok := strings.Cut(s, "\nFlags:\n")
+	if !ok {
+		t.Fatalf("no Flags section in the help output:\n%s", s)
+	}
+	var flagLines []string
+	for line := range strings.SplitSeq(flagsSection, "\n") {
+		if strings.HasPrefix(line, "      --") { // long flags only ("-h, --help" is the cobra built-in)
+			flagLines = append(flagLines, line)
+		}
+	}
+	if len(flagLines) != 3 {
+		t.Fatalf("the Flags section has %d long flags, want 3:\n%s", len(flagLines), flagsSection)
+	}
+	for _, want := range []string{"--api-url", "--api-key", "--log-level"} {
+		if !strings.Contains(flagsSection, want) {
+			t.Errorf("the Flags section is missing %s:\n%s", want, flagsSection)
+		}
+	}
+	for _, absent := range []string{"--cc-pair-id", "--source", "--branch", "--token", "--include", "--exclude", "--max-depth", "--max-file-size", "--limit", "--dry-run", "--id-base"} {
+		if strings.Contains(s, absent) {
+			t.Errorf("the help output mentions %s (ls has no cc-pair or source/git/limit/dry-run/id-base flags)", absent)
+		}
+	}
+
+	// The Environment section names exactly the two Onyx variables.
+	// It sits between "Environment:" and the next section, so cut the
+	// after-part at the first blank line.
+	_, envSection, ok := strings.Cut(s, "\nEnvironment:\n")
+	if !ok {
+		t.Fatalf("no Environment section in the help output:\n%s", s)
+	}
+	if before, _, found := strings.Cut(envSection, "\n\n"); found {
+		envSection = before
+	}
+	var envLines []string
+	for line := range strings.SplitSeq(envSection, "\n") {
+		if strings.TrimSpace(line) != "" {
+			envLines = append(envLines, line)
+		}
+	}
+	if len(envLines) != 2 {
+		t.Fatalf("the Environment section has %d lines, want 2:\n%s", len(envLines), envSection)
+	}
+	for _, want := range []string{config.EnvAPIURL, config.EnvAPIKey} {
+		if !strings.Contains(envSection, want) {
+			t.Errorf("the Environment section is missing %s:\n%s", want, envSection)
+		}
+	}
+	for _, absent := range []string{config.EnvCCPairID, config.EnvGitToken, config.EnvIDBase} {
+		if strings.Contains(envSection, absent) {
+			t.Errorf("the Environment section must not name %s (ls takes no cc-pair, git, or ID-base flags):\n%s", absent, envSection)
+		}
+	}
+}
+
+// TestLsUsageTemplateEnvNames guards the static Environment section
+// of lsUsageTemplate against drift, mirroring
+// TestCheckUsageTemplateEnvNames: it lists exactly the two Onyx
+// variables the ls flags stand on — the cc-pair, git, and ID-base
+// names must not.
+func TestLsUsageTemplateEnvNames(t *testing.T) {
+	for _, name := range []string{
+		config.EnvAPIURL,
+		config.EnvAPIKey,
+	} {
+		if !strings.Contains(lsUsageTemplate, name) {
+			t.Errorf("Environment section of lsUsageTemplate is missing %s", name)
+		}
+	}
+	for _, name := range []string{
+		config.EnvCCPairID,
+		config.EnvGitToken,
+		config.EnvIDBase,
+	} {
+		if strings.Contains(lsUsageTemplate, name) {
+			t.Errorf("lsUsageTemplate must not name %s (ls takes no cc-pair, git, or ID-base flags)", name)
+		}
+	}
+}
+
 // TestRootUsageListsSubcommands: the auto-generated top-level usage
-// (printed for a missing or unknown subcommand) lists both subcommands.
+// (printed for a missing or unknown subcommand) lists all three
+// subcommands.
 func TestRootUsageListsSubcommands(t *testing.T) {
 	for _, args := range [][]string{{}, {"frobnicate"}} {
 		name := "no arguments"
@@ -1400,7 +1755,7 @@ func TestRootUsageListsSubcommands(t *testing.T) {
 			if !ok {
 				t.Fatalf("no Available Commands section; stderr:\n%s", stderr)
 			}
-			for _, want := range []string{"check", "ingest"} {
+			for _, want := range []string{"check", "ingest", "ls"} {
 				if !strings.Contains(section, want) {
 					t.Errorf("Available Commands does not list %q:\n%s", want, section)
 				}
