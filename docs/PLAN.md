@@ -3,8 +3,9 @@
 **Status:** ✅ T1–T11 complete (config, models, transform, local directory
 source, git repository source, Onyx client, CLI wiring, summary &
 polish, test hardening, build & README, and the `sard check` pre-flight
-command, §13). ⏳ T12–T13 planned: the `sard ls` command (§14) and the
-optional `--tag` metadata flag — not yet implemented.
+command, §13). ⏳ T12–T14 planned: the `sard ls` command (§14), the
+optional `--tag` metadata flag, and the `mime_type` metadata field —
+not yet implemented.
 
 **Language:** Go (switched from Python, 2026-10 — motivation: a single static
 binary that needs no interpreter or virtualenv on the target machine). The
@@ -437,8 +438,10 @@ the `--id-base` / `SARD_ID_BASE` override when set, else the source's default
   `secondary_owners`, `additional_info`, image sections.
 - **Planned metadata additions (not yet implemented):** `tags` — a
   `list[string]` of user-supplied values from the repeatable `--tag`
-  flag, stamped on every document of the run (T13). Display metadata
-  only: it never enters the document-ID hash, so changing tags between
+  flag, stamped on every document of the run, the key absent when the
+  flag is unused (T13); `mime_type` — `text/markdown`, derived from the
+  file extension (T14). Both are display metadata only: neither enters
+  the document-ID hash, so changing tags or the mime mapping between
   runs updates existing documents instead of minting new IDs (R5).
 - **Content:** raw Markdown text in a single section. v2 candidate: split into sections per
   top-level heading (better citations/links) — noted as a future task, not planned now.
@@ -765,6 +768,25 @@ Run with `go test ./...`.
     `--help` gains exactly one `--tag` row; the existing
     ingest / dry-run / check / ls suites pass unmodified. The README's
     Configuration section documents the flag.
+- **T14 — `mime_type` metadata field (planned feature)** — a
+  `mime_type` key in every document's metadata: `text/markdown` for all
+  three ingested extensions (`.md`, `.mdx`, `.markdown`). Go's
+  `mime.TypeByExtension` knows none of them, so the transform carries a
+  small unexported extension→type map (keyed on `path.Ext` of
+  `RelPath`) with `text/markdown` as the default fallback; v1 ingests
+  Markdown only, so the value is constant today and the map is the
+  seam for future document types.
+  - **ID invariant**: as with T13's tags, `mime_type` is display
+    metadata only — it never enters the document-ID hash, so the
+    mapping can evolve without minting new document IDs (R5).
+  - **Implementation**: `internal/transform` only — no flag, no env
+    var, no model or signature changes; `--dry-run` payloads show the
+    key.
+  - Accept: `go test ./...` green. Transform: `.md`, `.mdx`,
+    `.markdown` → `metadata.mime_type == "text/markdown"`; document
+    IDs unchanged (the existing ID-stability tests stay unmodified and
+    still pass); the README documents the key alongside
+    `ingested_by`.
 
 ---
 
