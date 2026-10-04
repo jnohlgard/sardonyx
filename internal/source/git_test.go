@@ -281,6 +281,12 @@ func TestNormalizeURLErrors(t *testing.T) {
 		"https://github.com/",
 		"git@host",
 		"git@:owner/repo",
+		// A ./ or ../ prefix is a filesystem path, not the
+		// owner/repo shorthand: splitting on "/" yields two non-empty
+		// segments (".", "notes.md"), which the shorthand check used
+		// to accept as a bogus github.com/./… origin.
+		"./notes.md",
+		"../notes.md",
 		// An invalid percent-escape in the host makes url.Parse itself
 		// fail — the branch at the parse step (T9 coverage gate).
 		"https://ex%zzample.com/owner/repo",

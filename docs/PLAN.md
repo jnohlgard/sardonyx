@@ -329,7 +329,10 @@ are a configuration error (exit code 2), detected pre-flight.
 - **URL normalization** (pure function, unit-tested):
   - `https://host/owner/repo[.git]` → unchanged (token-injection point preserved).
   - `git@host:owner/repo[.git]` → `https://host/owner/repo` (we never clone over SSH).
-  - `owner/repo` shorthand → `https://github.com/owner/repo`.
+  - `owner/repo` shorthand → `https://github.com/owner/repo`. A `.` or `..`
+    segment disqualifies the shorthand — that spelling is a filesystem path
+    (e.g. `./notes.md`), and such inputs are configuration errors (exit code
+    2), not repository inputs.
   - Host detection → default `--source` value: `github.com` → `github`, `gitlab.*` → `gitlab`,
     anything else → `file`.
 - **Cloning:** `os/exec` runs `git clone --depth 1 [--branch <b>] <url> <tmpdir>` into a

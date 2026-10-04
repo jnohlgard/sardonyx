@@ -96,7 +96,10 @@ type NormalizedURL struct {
 //     "gitlab", … — carries no credential). ssh:// URLs convert the
 //     same way, keeping any embedded "user:password".
 //   - "owner/repo[.git]" — the GitHub shorthand for
-//     "https://github.com/owner/repo".
+//     "https://github.com/owner/repo"; a "." or ".." segment
+//     disqualifies the shorthand (that spelling is a filesystem path,
+//     e.g. "./notes.md", and it is an error here — the CLI rejects
+//     path-like sources before they reach this function).
 //   - "file:///abs/path" — a local path: Local, source file.
 //
 // The origin's host maps to the default Onyx source enum:
@@ -123,9 +126,15 @@ func NormalizeURL(raw string) (NormalizedURL, error) {
 		}
 		// owner/repo shorthand: exactly two non-empty segments, no
 		// user part (an "@" means it was an ssh attempt, not a
-		// shorthand).
+		// shorthand), and no "." or ".." segment — a path with a ./
+		// or ../ prefix (e.g. "./notes.md") is a filesystem path,
+		// not a repository, so it must not normalize to a bogus
+		// github.com/./… origin.
 		parts := strings.Split(s, "/")
-		if len(parts) == 2 && parts[0] != "" && parts[1] != "" && !strings.ContainsAny(s, "@") {
+		if len(parts) == 2 &&
+			parts[0] != "" && parts[0] != "." && parts[0] != ".." &&
+			parts[1] != "" && parts[1] != "." && parts[1] != ".." &&
+			!strings.ContainsAny(s, "@") {
 			return remoteOrigin("https", "github.com", s, "", false)
 		}
 		return NormalizedURL{}, fmt.Errorf(
