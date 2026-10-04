@@ -4,15 +4,19 @@
 git repo URL or a local directory into Onyx via the Ingestion API.
 
 ## Status
-- T1–T10 are complete: config, models, transform, local directory
+- T1–T11 are complete: config, models, transform, local directory
   source, git repository source, Onyx client, CLI wiring, summary &
   polish (progress lines, summary with elapsed time and failure list,
   the source layer's skipped count), test hardening (CRLF, non-UTF-8,
   oversize, monorepo depth, .mdx frontmatter, and the two
-  URL-normalization coverage gaps), and build & README (the static
-  binary recipe, the quickstart, and `--dry-run` running without Onyx
-  credentials — a dry run sends nothing, so it needs none). No stub
-  packages remain; the task list is in `docs/PLAN.md` §10.
+  URL-normalization coverage gaps), build & README (the static binary
+  recipe, the quickstart, and `--dry-run` running without Onyx
+  credentials — a dry run sends nothing, so it needs none), and the
+  `sard check` pre-flight (three read-only probes, §13). T12 — the
+  `sard ls` command (list the documents the API key can see via
+  `GET /onyx-api/ingestion`) — is planned in `docs/PLAN.md` §14 and
+  not yet implemented. No stub packages remain; the task list is in
+  `docs/PLAN.md` §10.
 
 ## Naming
 - Repo/Go module is `sardonyx`; the binary and command are `sard`.
