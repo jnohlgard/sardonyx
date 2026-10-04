@@ -4,20 +4,20 @@
 git repo URL or a local directory into Onyx via the Ingestion API.
 
 ## Status
-- T1–T11 are complete: config, models, transform, local directory
+- T1–T12 are complete: config, models, transform, local directory
   source, git repository source, Onyx client, CLI wiring, summary &
   polish (progress lines, summary with elapsed time and failure list,
   the source layer's skipped count), test hardening (CRLF, non-UTF-8,
   oversize, monorepo depth, .mdx frontmatter, and the two
   URL-normalization coverage gaps), build & README (the static binary
   recipe, the quickstart, and `--dry-run` running without Onyx
-  credentials — a dry run sends nothing, so it needs none), and the
-  `sard check` pre-flight (three read-only probes, §13). T12–T14 are
-  planned and not yet implemented: T12 is the `sard ls` command (list
-  the documents the API key can see via `GET /onyx-api/ingestion`,
-  §14); T13 adds the optional `--tag` metadata flag; T14 adds the
-  `mime_type` metadata field. No stub packages remain; the task list
-  is in `docs/PLAN.md` §10.
+  credentials — a dry run sends nothing, so it needs none), the
+  `sard check` pre-flight (three read-only probes, §13), and the
+  `sard ls` command (list the documents the API key can see via
+  `GET /onyx-api/ingestion`, read-only, §14). T13–T14 are planned and
+  not yet implemented: T13 adds the optional `--tag` metadata flag;
+  T14 adds the `mime_type` metadata field. No stub packages remain;
+  the task list is in `docs/PLAN.md` §10.
 
 ## Naming
 - Repo/Go module is `sardonyx`; the binary and command are `sard`.

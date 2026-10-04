@@ -10,14 +10,17 @@
 
 ---
 
-> **Status:** ✅ Complete — all implementation tasks T1–T11 are done (task list in
-> `docs/PLAN.md` §10). The tool builds to a single static binary
+> **Status:** ✅ T1–T12 complete (task list in
+> `docs/PLAN.md` §10) — including the `sard check` pre-flight and the
+> read-only `sard ls` document listing. T13 (`--tag`) and T14
+> (`mime_type`) are planned. The tool builds to a single static binary
 > (see [Building](#building)).
 
 ## What it does
 
 ```bash
 sard check                                           # pre-flight: verify the environment without creating any document
+sard ls                                              # list the documents the API key can see (read-only)
 sard ingest https://github.com/owner/repo            # all *.md / *.mdx / *.markdown in the repo
 sard ingest ./my-docs                                # all Markdown files under a local directory
 sard ingest https://github.com/owner/repo --include "docs/**" --dry-run
@@ -143,7 +146,37 @@ common failure modes:
 - **exit 2 — no Ingestion API**: the URL's deployment has no
   `/onyx-api/ingestion` endpoint at all.
 
-### 5. Real run
+### 5. List ingested documents
+
+`sard ls` shows what your API key can see on the deployment — the
+documents previous `sard ingest` runs created or updated — via the
+read-only `GET /onyx-api/ingestion` sibling of the Ingestion POST. It
+**creates, updates, and deletes nothing**, and it needs **only the API
+key** (no cc-pair id):
+
+```bash
+sard ls
+```
+
+The list goes to **stdout**, one line per document, in the order the
+server returns it — three tab-separated fields: `<document_id>` (the
+stable ID `sard` generates), `<semantic_id>` (the name shown in the
+Onyx UI), and `<link>` (only when the document has one):
+
+```text
+9f86d081884c7d659a2e…	owner/repo/docs/getting-started.md
+4b7dc2e0f1a3…	owner/repo/docs/api-reference.md	https://github.com/owner/repo/blob/main/docs/api-reference.md
+```
+
+A summary (`ls: N documents in …`) goes to stderr. An empty list
+exits `0` with a warning (*no documents visible to this API key —
+nothing has been ingested yet, or the key's scope is empty*); exit
+`1` means the server is unreachable or the list response is
+malformed, exit `2` a configuration, credentials, or endpoint problem
+(the deployment may predate the GET endpoint — `sard check` tells you
+which), and `130` an interrupt.
+
+### 6. Real run
 
 Put your credentials where you like — CLI flag, environment variable, or a
 `.env` file in the working directory (precedence: flag → env → `.env`);
@@ -189,9 +222,11 @@ Priority: CLI flag → environment variable → `.env` file (current working dir
 
 `ONYX_API_KEY` and `ONYX_CC_PAIR_ID` are required for real ingestion runs
 and for `sard check` (the pre-flight runs the same credential check a real
-run does); `--dry-run` needs neither (it sends nothing). All ingest flags
-are documented by `sard ingest --help` and in `docs/PLAN.md` §4; check has
-only the four Onyx-side flags (`sard check --help`).
+run does); `sard ls` needs only `ONYX_API_KEY` (its GET endpoint is
+key-scoped and sends no cc-pair); `--dry-run` needs neither (it sends
+nothing). All ingest flags are documented by `sard ingest --help` and in
+`docs/PLAN.md` §4; check has only the four Onyx-side flags
+(`sard check --help`); ls has only the three (`sard ls --help`).
 
 See [`.env.example`](.env.example).
 
@@ -207,7 +242,7 @@ interpreter or virtualenv needed on the target machine.
 
 ```
 docs/
-  PLAN.md                # full implementation plan + task breakdown (T1–T11)
+  PLAN.md                # full implementation plan + task breakdown (T1–T14)
   onyx-ingestion-api.md  # condensed reference for the Onyx Ingestion API
 cmd/sard/
   main.go                # thin entry point: run + exit code
@@ -220,6 +255,7 @@ internal/
   transform/markdown.go  # IngestedFile → Onyx payload
   onyx/client.go         # HTTP client, retries, result mapping
   onyx/check.go          # the sard check pre-flight: three read-only probes
+  onyx/list.go           # the sard ls data source: GET /onyx-api/ingestion (read-only)
 ```
 
 Tests live next to the code in each package as `*_test.go` (mock Onyx server

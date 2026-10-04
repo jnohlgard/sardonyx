@@ -124,7 +124,7 @@ print(r.status_code, r.text)
 
 ---
 
-## Other endpoints (fetched 2026-10-02 — used by `sard check`, PLAN.md §13)
+## Other endpoints (fetched 2026-10-02 — used by `sard check` (PLAN.md §13) and `sard ls` (PLAN.md §14))
 
 The API reference has grown since the section above; the endpoints below
 matter to Sardonyx:
@@ -138,7 +138,8 @@ matter to Sardonyx:
   `{"document_id", "semantic_id", "link"}` for the documents the key can
   see. A `200` with the configured key proves the key is valid *for
   ingestion* without creating, updating, or deleting anything — the
-  credential check `sard check` relies on.
+  credential check `sard check` relies on, and it is the data source of
+  the read-only `sard ls` listing (PLAN.md §14).
   <https://docs.onyx.app/developers/api_reference/ingestion/get_ingestion_docs>
 - **`GET {API_BASE_URL}/manage/admin/cc-pair/{cc_pair_id}`** — "Get CC Pair
   Full Info": Bearer auth; `read:connectors` (included in `manage:connectors`

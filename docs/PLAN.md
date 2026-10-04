@@ -1,11 +1,11 @@
 # Sardonyx — Implementation Plan
 
-**Status:** ✅ T1–T11 complete (config, models, transform, local directory
+**Status:** ✅ T1–T12 complete (config, models, transform, local directory
 source, git repository source, Onyx client, CLI wiring, summary &
-polish, test hardening, build & README, and the `sard check` pre-flight
-command, §13). ⏳ T12–T14 planned: the `sard ls` command (§14), the
-optional `--tag` metadata flag, and the `mime_type` metadata field —
-not yet implemented.
+polish, test hardening, build & README, the `sard check` pre-flight
+command (§13), and the `sard ls` command (§14)). ⏳ T13–T14 planned:
+the optional `--tag` metadata flag, and the `mime_type` metadata field
+— not yet implemented.
 
 **Language:** Go (switched from Python, 2026-10 — motivation: a single static
 binary that needs no interpreter or virtualenv on the target machine). The
@@ -1016,7 +1016,9 @@ cc-pair, wrong URL), and a line in the intro example block.
 
 ## 14. The `sard ls` command (T12)
 
-**Status:** planned — T12 (§10), not yet implemented.
+**Status:** ✅ implemented (T12a `onyx.Client.ListDocs`, T12b the
+command, T12c the docs) — `internal/onyx/list.go`, `internal/cli`
+(`newLsCmd` / `runLs`), `config.Flags.CCPairOptional`.
 
 `sard ls` lists the documents that the configured API key can see via the
 read-only sibling of the Ingestion `POST`:
