@@ -101,12 +101,13 @@ sard ingest ./my-docs --dry-run                       # from a local directory
 Inspect the output to confirm discovery and the document shape before you
 spend a real run on it.
 
-> **⚠️ Read this first — stale documents.** The Ingestion API has **no delete
-> endpoint**: a file removed from the source leaves its (stale) document
+> **⚠️ Read this first — stale documents.** `sard` does **not implement
+> deletion**: a file removed from the source leaves its (stale) document
 > behind in Onyx. Re-running `sard` updates existing documents (upsert by
-> stable ID) but never removes anything. Ingest only the directories you
-> intend to keep; see [Known limitations](#known-limitations-v1) and
-> `docs/PLAN.md` §11 for the discussion.
+> stable ID) but never removes anything — even though the Ingestion API
+> supports it (`DELETE /onyx-api/ingestion/{document_id}`). Ingest only the
+> directories you intend to keep; see [Known limitations](#known-limitations-v1)
+> and `docs/PLAN.md` §11 for the discussion.
 
 ### 4. Verify your setup
 
@@ -266,9 +267,11 @@ via `net/http/httptest`); git fixtures live under `internal/source/testdata/`.
 
 ## Known limitations (v1)
 
-- **No deletion**: the Ingestion API cannot remove documents, so files deleted from the
-  source keep their (stale) Onyx documents. Re-ingesting updates them, but deletion is a
-  gap — see `docs/PLAN.md` §11.
+- **No deletion yet**: `sard` does not implement deletion — the Ingestion API has a
+  delete endpoint (`DELETE /onyx-api/ingestion/{document_id}`; the `document_id`s are
+  what `sard ls` lists), so removing stale documents is a v2 feature, not an API
+  limitation. Until then, files deleted from the source keep their (stale) Onyx
+  documents; re-ingesting updates existing ones. See `docs/PLAN.md` §11.
 - One document = one Markdown file, one section (no per-heading chunk splitting yet).
 - Sequential ingestion only (no parallel uploads in v1).
 
