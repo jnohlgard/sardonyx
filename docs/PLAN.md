@@ -346,11 +346,15 @@ are a configuration error (exit code 2), detected pre-flight.
 - **Filtering:** the same `--include`/`--exclude`/`--max-depth`/`--max-file-size` options as
   the local source apply; `GitOptions` mirrors `LocalOptions` (with `--branch`/`--token` as the
   git-specific additions) so the pipeline (T7) treats both sources uniformly.
-- **Provenance per file:** `git log -1 --format=%H%x00%ct -- <path>` → commit SHA (→
-  `metadata.commit`) and commit unix timestamp (→ `doc_updated_at`). One `git log` call per
-  file is acceptable for v1 (batching is a future optimization). With a `--depth 1` clone the
-  history holds only the HEAD commit, so every file is attributed to HEAD — a safe upper bound
-  for Onyx freshness; the per-file `git log` form becomes exact if the depth is ever raised.
+- **Provenance per file:** a single `git log -1 --format=%H%x00%ct HEAD` call → the
+  clone's HEAD commit SHA (→ `metadata.commit`) and committer unix timestamp (→
+  `doc_updated_at`), applied to every file. A `--depth 1` clone holds only that commit
+  and every tracked file is in it, so one call serves the whole run — no per-file
+  `git log` spawns — and attributing every file to HEAD is a safe upper bound for
+  Onyx freshness. The per-file `git log -1 --format=%H%x00%ct -- <path>` form is kept
+  as the fallback when the HEAD resolution fails (the file is then skipped with a
+  warning, as before) and becomes the exact-provenance form if the clone is ever
+  deepened past depth 1.
 - **Section link:** for `https://github.com/…` (public) URLs, blob URL
   `https://github.com/owner/repo/blob/<branch>/<path>`; otherwise `null`.
 - **Default ID base:** the normalized origin URL with a lowercased host and
@@ -596,7 +600,8 @@ Run with `go test ./...`.
     empty-file skip.
 - **T5 — Git repo source** (`internal/source/git.go`)
   - URL normalization, shallow clone via `os/exec` into an `os.MkdirTemp` dir (deferred
-    cleanup), `git ls-files`, per-file `git log` metadata, token injection, blob URLs.
+    cleanup), `git ls-files`, a single `git log -1 HEAD` for every file's provenance
+    (per-file `git log` retained as fallback — §5.2), token injection, blob URLs.
   - Accept: ✅ unit tests for URL normalization (pure fn, table-driven); integration test
     that clones a fixture repo built in a temp dir (a repo under `testdata/` would nest a repo
     in a repo; local-path clone via `file://` so `--depth` is honored; skipped when `git` is
