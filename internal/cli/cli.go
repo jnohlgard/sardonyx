@@ -730,12 +730,9 @@ func discover(src string, p *ingestFlags, settings *config.Settings, log *slog.L
 	}
 
 	res, err := source.Git(src, source.GitOptions{
-		Include:        filter.Include,
-		Exclude:        filter.Exclude,
-		MaxDepth:       filter.MaxDepth,
-		MaxFileSizeKiB: filter.MaxFileSizeKiB,
-		Branch:         p.branch,
-		Token:          settings.GitToken,
+		Filter: filter,
+		Branch: p.branch,
+		Token:  settings.GitToken,
 	}, log)
 	if err != nil {
 		return nil, err

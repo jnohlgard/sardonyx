@@ -304,14 +304,13 @@ func redact(text string, secrets ...string) string {
 
 // GitOptions configures Git.
 //
-// Its Include, Exclude, MaxDepth, and MaxFileSizeKiB fields are the same
-// shared discovery filter as the local source — a deliberate decision
-// (docs/PLAN.md §5.2/§5.3): the include/exclude doublestar globs match
-// case-sensitively against the file path relative to the repository root
-// with forward slashes (`*` stays within one level, `**` crosses levels),
-// MaxDepth counts path components (depth 1 is directly under the root; 0
-// is unlimited), and MaxFileSizeKiB = 0 is unlimited. filter() yields that
-// shared Filter so Git and Local run the identical pipeline (collect).
+// It embeds the same shared discovery filter as the local source — a
+// deliberate decision (docs/PLAN.md §5.2/§5.3): the include/exclude
+// doublestar globs match case-sensitively against the file path relative
+// to the repository root with forward slashes (`*` stays within one
+// level, `**` crosses levels), MaxDepth counts path components (depth 1
+// is directly under the root; 0 is unlimited), and MaxFileSizeKiB = 0 is
+// unlimited — so Git and Local run the identical pipeline (collect).
 //
 // The git-specific fields:
 //
@@ -320,24 +319,9 @@ func redact(text string, secrets ...string) string {
 //   - Token: a git auth token for private repositories; injected into
 //     the clone URL as x-access-token. Never logged or echoed.
 type GitOptions struct {
-	Include        []string
-	Exclude        []string
-	MaxDepth       int
-	MaxFileSizeKiB int
-	Branch         string
-	Token          string
-}
-
-// filter returns the shared Filter that the discovery pipeline (collect)
-// applies, built from GitOptions' four filter fields. The git-specific
-// Branch and Token are left out — they configure cloning, not filtering.
-func (o GitOptions) filter() Filter {
-	return Filter{
-		Include:        o.Include,
-		Exclude:        o.Exclude,
-		MaxDepth:       o.MaxDepth,
-		MaxFileSizeKiB: o.MaxFileSizeKiB,
-	}
+	Filter
+	Branch string
+	Token  string
 }
 
 // GitResult is Git's output, mirroring LocalResult: the discovered
@@ -423,7 +407,7 @@ func Git(src string, opts GitOptions, log *slog.Logger) (*GitResult, error) {
 		return nil, configError("invalid git source %q: %v", src, err)
 	}
 
-	f := opts.filter()
+	f := opts.Filter
 	if err := f.validate(); err != nil {
 		return nil, err
 	}
