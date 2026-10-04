@@ -3,7 +3,8 @@
 **Status:** ✅ T1–T11 complete (config, models, transform, local directory
 source, git repository source, Onyx client, CLI wiring, summary &
 polish, test hardening, build & README, and the `sard check` pre-flight
-command, §13).
+command, §13). ⏳ T12 planned: the `sard ls` command (§14) — not yet
+implemented.
 
 **Language:** Go (switched from Python, 2026-10 — motivation: a single static
 binary that needs no interpreter or virtualenv on the target machine). The
@@ -132,8 +133,10 @@ Options
 
 Implementation notes:
 
-- Single subcommand. `spf13/cobra` provides the root `sard` command and
-  the `ingest` subcommand; the flag definitions on `ingest` are the single
+- `sard ingest` is the primary subcommand; `sard check` (§13) and
+  `sard ls` (§14) each have their own section with their own spec.
+  `spf13/cobra` provides the root `sard` command and the subcommands; the
+  flag definitions on `ingest` are the single
   source of truth for the flag list in `--help` — cobra renders the usage
   line and the option list from the same definitions that bind the parsed
   values, so the two cannot drift apart. The repeatable `--include` /
@@ -685,6 +688,48 @@ Run with `go test ./...`.
     green; the coverage gates unchanged (config ≥ 90 % — 93.6 % —,
     transform 100 %, all ten URL-normalization functions 100 %; the
     onyx and cli packages are not gated).
+- **T12 — `sard ls`** (§14) — a third subcommand that lists the documents
+  the API key can see via `GET /onyx-api/ingestion`, without creating,
+  updating, or deleting anything.
+  - T12a — `onyx.Client.ListDocs` in a new `internal/onyx/list.go`
+    (the `IngestionDoc` type, the bare-array / `{data: [...]}` parse
+    tolerance, the retry and error mapping per §14.2).
+    - Accept: `go test ./internal/onyx` green: a 200 with a bare array and a
+      200 with the `{data: [...]}` envelope both parse to the same documents
+      (method, path, and Bearer header asserted; the key in no returned
+      string); a 200 with a non-list body → an error, not a silent empty
+      list; 401 → `ErrAuth` with exactly one request (no retry); 403 →
+      `ErrAuth`; 404/405/400 → `ErrNoIngestionAPI` with exactly one request
+      (no retry); 429 → 200 (2 requests) and 500 ×3 → `ErrUnreachable`
+      (millisecond backoff injection); a connection failure →
+      `ErrUnreachable`; context cancellation mid-flight → the context's
+      error. The suite stays fast (~1 s).
+  - T12b — the `sard ls` command in `internal/cli` (the three flags, the
+    usage template, `runLs`, the stdout/stderr split, the exit-code
+    mapping, the package doc) and `config.Flags.CCPairOptional` (skip the
+    cc-pair requirement; a set value is still validated and picked up)
+    with its `config_test.go` cases.
+    - Accept: end-to-end `Run` against `httptest` — exit 0 (stdout strictly
+      one line per document, in server order; the `ls: N documents in …`
+      summary on stderr; the server received exactly one GET); exit 0 for
+      an empty list with the warning; exit 2 for a missing API key, an
+      invalid `--log-level`, a 401, a 403, and a 404 (the message names the
+      endpoint and the URL, never the key); exit 1 for a dead port and for
+      a persistent 429; 130 for SIGINT mid-list; `sard ls --help` → exit 0
+      with exactly three flags and an Environment section listing exactly
+      `ONYX_API_URL`, `ONYX_API_KEY` (a `TestLsUsageTemplateEnvNames`
+      guard, mirroring check's); the root usage lists `ls`, `check`, and
+      `ingest`. The existing ingest/dry-run/check suites pass unmodified.
+  - T12c — README (a "List ingested documents" subsection in Getting
+    started after "Verify your setup", with a sample output block; the
+    intro example block; a `onyx/list.go` line in Repository layout; the
+    Configuration note that `ls` needs only the key) and the final docs
+    pass (a cross-reference in docs/onyx-ingestion-api.md's GET endpoint
+    note, AGENTS.md's Status line).
+    - Accept: `go test ./...` and `go vet ./...` green; the coverage gates
+      unchanged (config ≥ 90 %, transform 100 %, all ten
+      URL-normalization functions 100 %; the onyx and cli packages are not
+      gated).
 
 ---
 
@@ -909,3 +954,150 @@ type CheckResult struct {
 started (between the dry-run step and the real run: set credentials →
 `sard check` → first real run), the failure modes (bad key, unknown
 cc-pair, wrong URL), and a line in the intro example block.
+
+---
+
+## 14. The `sard ls` command (T12)
+
+**Status:** planned — T12 (§10), not yet implemented.
+
+`sard ls` lists the documents that the configured API key can see via the
+read-only sibling of the Ingestion `POST`:
+
+- **Request** — a single `GET {api-url}/onyx-api/ingestion` with Bearer
+  auth (docs/onyx-ingestion-api.md, "Other endpoints"). The endpoint
+  returns an array of `{"document_id", "semantic_id", "link"}` objects
+  for the documents the key can see — the documents previous `sard ingest`
+  runs put on Onyx (plus anything else the key sees). `document_id` is
+  the stable ID we generate (§6); `semantic_id` is the name shown in the
+  Onyx UI; `link` is the source link when one was sent.
+- **Read-only** — one GET; it creates, updates, and deletes nothing.
+- **Key-scoped, not cc-pair-scoped** — the endpoint takes no cc-pair
+  argument, so `ls` needs no cc-pair id (§14.3.1).
+- **No fallback** — unlike `sard check` probe 2 (which disambiguates a
+  failed GET via a deliberately-invalid POST), a POST cannot produce a
+  list: a 404/405 here is a terminal error (§14.2), reported as a
+  possible misconfiguration or an older deployment.
+
+### 14.1 Spec
+
+```
+sard ls [options]                    (no positional arguments)
+
+Options
+  --api-url    Onyx API base URL        (default https://cloud.onyx.app/api; env ONYX_API_URL)
+  --api-key    Onyx API key             (env ONYX_API_KEY)
+  --log-level  debug | info | warning | error (default info)
+```
+
+Three flags only: no `--cc-pair-id` (the endpoint is key-scoped,
+§14.3.1), and no source/git/include/limit/dry-run flags (no discovery).
+The usage template follows the check convention (a Long summary; an
+Environment section listing exactly `ONYX_API_URL` and `ONYX_API_KEY`;
+no Arguments section, since there is no positional argument).
+
+### 14.2 The request
+
+One `GET {api-url}/onyx-api/ingestion` under the shared 10 s probe
+deadline (`doProbe`), with `Authorization: Bearer {key}`.
+
+| Outcome | Handling |
+| ------- | -------- |
+| 200 | Parse the document array, tolerating both a bare array and a `{data: [...]}` envelope (schema drift, like `parseCCPairBody`). A 200 whose body matches neither is an error (§14.4, exit 1) — unlike check's count-only probe, `ls` must not silently report an empty list for a malformed body. |
+| 401/403 | Fail fast: wrapped `ErrAuth` with the `authHint` advice (exit 2) — the same classification as the ingest fail-fast and check. |
+| 404/405 or any other 4xx | No retry: wrapped `ErrNoIngestionAPI`, message "GET /onyx-api/ingestion is not available at {url} — the deployment may predate the endpoint, or ONYX_API_URL is misconfigured" (exit 2). |
+| 429 / 5xx / connection | Up to 3 attempts with the shared injectable backoff (`c.sleep`, same machinery as `Ingest`); exhausted → wrapped `ErrUnreachable` (exit 1). |
+| Context cancellation | The context's error (exit 130). |
+
+The API key never appears in any error or reason string (the existing
+discipline; the leak test is extended to `ListDocs`).
+
+### 14.3 Output
+
+**stdout** — the list itself, one line per document, in the order the
+server returned them (v1 preserves server order; a consumer that wants
+another order sorts in the shell):
+
+```
+<document_id>\t<semantic_id>
+<document_id>\t<semantic_id>\t<link>        ← link field only when non-empty
+```
+
+**stderr** — a single summary line (house style, §8):
+
+```
+time=... level=INFO msg="ls: 23 documents in 0.42s"
+```
+
+An empty list still exits 0, with a warning instead of the summary:
+`no documents visible to this API key — nothing has been ingested yet
+(or the key's scope is empty)`.
+
+Non-goals (v1): no `--limit`, no JSON output mode, no
+filter/sort flags, no cc-pair scoping (the endpoint offers none).
+
+### 14.3.1 Decision: the cc-pair id is not required (and not sent)
+
+`config.Flags` gains a boolean `CCPairOptional`: when set, `Resolve`
+skips the "ONYX_CC_PAIR_ID is required" problem — everything else is
+unchanged (the API key is still required, a set cc-pair value is still
+validated as an integer and picked up into `Settings` via the normal
+flag > env > `.env` precedence, it simply goes unused by `ls`).
+`runLs` passes the flag and builds the client with cc-pair 0; the GET
+request carries no cc-pair at all. This is the only `internal/config`
+change T12 makes.
+
+### 14.4 Exit codes
+
+| Code | Condition (ls) |
+| ---- | -------------- |
+| 0    | The list was retrieved — including an empty list (a warning is logged). |
+| 1    | Server unreachable (connection failure/timeout after retries, or a persistent 429/5xx) — or a 200 whose body is neither a bare array nor a `{data: [...]}` envelope (malformed response). |
+| 2    | Configuration error (missing/invalid `ONYX_API_KEY`, invalid `--log-level`) — or a rejected key (401/403: the same classification as the ingest fail-fast and check) — or the GET endpoint unavailable at the configured URL (404/405/other 4xx). |
+| 130  | Interrupted (Ctrl-C). |
+
+The stdout/stderr discipline of §8 applies: the document lines on
+stdout, all diagnostics and the summary on stderr.
+
+### 14.5 Implementation
+
+**`internal/onyx/list.go`** (new file; `client.go` and `check.go` keep
+their shapes):
+
+- `type IngestionDoc struct { DocumentID, SemanticID, Link string }`
+- `func (c *Client) ListDocs(ctx context.Context) ([]IngestionDoc, error)`
+  — the request table of §14.2: `doProbe` for the 10 s deadline and the
+  Bearer header, the shared `c.sleep` backoff for retries, and
+  `authError` / `unreachableError` / `excerpt` reused as-is. A
+  `parseDocListBody` tolerates the bare array and the envelope; a 200
+  matching neither returns an error carrying the excerpt.
+
+**`internal/config`**: `Flags.CCPairOptional bool` per §14.3.1, with
+`config_test.go` cases (not required; still validated and picked up when
+set; precedence and the dry-run behavior unchanged).
+
+**`internal/cli`**:
+
+- `lsFlags{apiURL, apiKey, logLevel}`; `newLsCmd` (`Use: "ls"`,
+  `Args: cobra.NoArgs`, the three flags, the usage template = the check
+  template with an Environment section listing exactly `ONYX_API_URL`,
+  `ONYX_API_KEY`); `runLs` mirroring `runCheck`'s pre-flight shape minus
+  the cc-pair validation: `buildLogger` →
+  `config.Resolve(Flags{…, CCPairOptional: true})` →
+  `signal.NotifyContext` → `onyx.NewClient(url, key, 0).ListDocs(ctx)` →
+  the stdout lines → the stderr summary/warning → the exit code.
+- `Run` adds the command to the root; the root `Long` gains a sentence
+  about `sard ls`; the package doc gains the `ls` exit-code mapping.
+  The root usage template already renders the subcommand list (the
+  existing root-usage test gains an `ls` assertion).
+
+**Tests** (`internal/onyx/list_test.go`, additions to
+`internal/cli/cli_test.go` and `internal/config/config_test.go`): see
+the acceptance criteria in §10.
+
+**README & docs** (T12c): a "List ingested documents" subsection in
+Getting started after "Verify your setup" with a sample output block;
+a line in the intro example block; a `onyx/list.go` line in Repository
+layout; the Configuration section notes that `ls` needs only the API
+key; a cross-reference in docs/onyx-ingestion-api.md's GET endpoint
+note; AGENTS.md's Status line.
