@@ -9,7 +9,8 @@
 // (include/exclude globs, max depth, max file size) and collect() is the
 // single implementation of the pipeline. Each source supplies a build
 // closure that turns a surviving file into its models.IngestedFile record
-// (local: mtime provenance; git: commit provenance via lastCommit).
+// (local: mtime provenance; git: HEAD-commit provenance, with the
+// per-file lastCommit as fallback).
 //
 // Keeping the pipeline in one place means a future change to the skip
 // semantics (e.g. the planned T13 --tag / T14 mime_type) applies to both
@@ -85,7 +86,8 @@ func (f Filter) validate() error {
 // file that survives all the checks, build produces the record: it receives
 // the file's os.FileInfo and its content already repaired to valid UTF-8,
 // so a source that needs no extra I/O (local: the stat's mtime) adds none,
-// while a source that does (git: lastCommit) can call into its own state.
+// while a source that does (git: headCommit / lastCommit) can call into
+// its own state.
 // A non-nil return from build counts as one more skip; build is responsible
 // for emitting its own warning (the git source redacts secrets from it).
 //
@@ -140,7 +142,7 @@ func collect(root string, candidates []string, f Filter, log *slog.Logger,
 
 		rec, err := build(rel, fi, content)
 		if err != nil {
-			// build already warned (e.g. git's lastCommit failure, redacted);
+			// build already warned (e.g. git's provenance failure, redacted);
 			// just count the drop.
 			skipped++
 			continue

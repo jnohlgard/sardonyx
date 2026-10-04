@@ -6,6 +6,7 @@ package source
 import (
 	"bytes"
 	"encoding/base64"
+	"fmt"
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
@@ -840,4 +841,117 @@ func TestGitTokenInjection(t *testing.T) {
 			}
 		}
 	})
+}
+
+// TestParseCommit covers the %H%x00%ct output parser shared by
+// headCommit and lastCommit (docs/PLAN.md §5.2). Pure function — no
+// git binary needed.
+func TestParseCommit(t *testing.T) {
+	const sha = "0123456789abcdef0123456789abcdef01234567"
+
+	t.Run("valid line", func(t *testing.T) {
+		gotSHA, gotTime, err := parseCommit([]byte(sha + "\x001700000000\n"))
+		if err != nil {
+			t.Fatalf("parseCommit: %v", err)
+		}
+		if gotSHA != sha {
+			t.Errorf("SHA = %q, want %q", gotSHA, sha)
+		}
+		if want := time.Unix(1700000000, 0).UTC(); !gotTime.Equal(want) {
+			t.Errorf("time = %v, want %v", gotTime, want)
+		}
+		if gotTime.Location() != time.UTC {
+			t.Errorf("time location = %v, want UTC", gotTime.Location())
+		}
+	})
+
+	t.Run("no NUL separator", func(t *testing.T) {
+		if _, _, err := parseCommit([]byte(sha + "\n")); err == nil {
+			t.Fatal("parseCommit succeeded, want an error for a missing NUL")
+		}
+	})
+
+	t.Run("bad timestamp", func(t *testing.T) {
+		if _, _, err := parseCommit([]byte(sha + "\x00not-a-number\n")); err == nil {
+			t.Fatal("parseCommit succeeded, want an error for a bad timestamp")
+		}
+	})
+}
+
+// TestGitEmptyRepo: a repository with no commits clones successfully
+// (git only warns) and yields zero files — the headCommit resolution
+// fails on such a clone, but with no candidates the per-file fallback
+// is never invoked and the run stays clean (docs/PLAN.md §5.2).
+func TestGitEmptyRepo(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git not on PATH (a runtime dependency, docs/PLAN.md §12)")
+	}
+
+	root := t.TempDir()
+	runGit(t, root, "init", "-q", "-b", "main", ".")
+
+	res, err := Git(root, GitOptions{}, discard())
+	if err != nil {
+		t.Fatalf("Git(empty repo): %v", err)
+	}
+	if len(res.Files) != 0 {
+		t.Errorf("Files = %d, want 0", len(res.Files))
+	}
+	if res.Skipped != 0 {
+		t.Errorf("Skipped = %d, want 0", res.Skipped)
+	}
+}
+
+// TestGitHeadResolutionFailsFallsBackToPerFileLog: when the single
+// `git log -1 HEAD` resolution fails (simulated with a fake git on
+// PATH that fails on that exact call), the build closure falls back to
+// the per-file `git log -1 -- <path>` form. In a depth-1 clone the
+// two agree — the clone's visible history is the one HEAD commit — so
+// no file is skipped and the provenance is exactly what the HEAD call
+// would have returned (docs/PLAN.md §5.2).
+func TestGitHeadResolutionFailsFallsBackToPerFileLog(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git not on PATH (a runtime dependency, docs/PLAN.md §12)")
+	}
+	hermeticGitConfig(t)
+
+	// The fixture is built with the real git, before the fake is on
+	// PATH: two commits (the later one touches only README.md).
+	root, _, _, shaB, timeB := gitFixtureRepo(t)
+
+	realGit, err := exec.LookPath("git")
+	if err != nil {
+		t.Fatalf("LookPath(git): %v", err)
+	}
+	fakeDir := t.TempDir()
+	// The fake fails `git … log … HEAD` (the HEAD resolution) and
+	// passes every other call through to the real git — including
+	// the per-file `git … log … -- <path>` fallback.
+	script := fmt.Sprintf("#!/bin/sh\n"+
+		"last=\"\"\nlog=0\n"+
+		"for a in \"$@\"; do\n  last=$a\n  case $a in log) log=1 ;; esac\ndone\n"+
+		"if [ \"$log\" = 1 ] && [ \"$last\" = \"HEAD\" ]; then\n"+
+		"  echo \"fatal: fake git: HEAD resolution disabled by test\" >&2\n  exit 128\nfi\n"+
+		"exec %q \"$@\"\n", realGit)
+	if err := os.WriteFile(filepath.Join(fakeDir, "git"), []byte(script), 0o755); err != nil {
+		t.Fatalf("writing fake git: %v", err)
+	}
+	t.Setenv("PATH", fakeDir+string(os.PathListSeparator)+os.Getenv("PATH"))
+
+	var buf bytes.Buffer
+	log := slog.New(slog.NewTextHandler(&buf, nil))
+	res, err := Git(root, GitOptions{Branch: "main"}, log)
+	if err != nil {
+		t.Fatalf("Git: %v\nlog:\n%s", err, buf.String())
+	}
+	wantPaths(t, res.Files, "README.md", "docs/intro.md", "guide.mdx")
+	for _, f := range res.Files {
+		if f.CommitSHA != shaB || !f.DocUpdatedAt.Equal(timeB) {
+			t.Errorf("%s: CommitSHA=%q DocUpdatedAt=%v, want the HEAD commit %q %v",
+				f.RelPath, f.CommitSHA, f.DocUpdatedAt, shaB, timeB)
+		}
+	}
+	if strings.Contains(buf.String(), "skipping file without commit metadata") {
+		t.Errorf("expected no skip warnings in the log output:\n%s", buf.String())
+	}
 }

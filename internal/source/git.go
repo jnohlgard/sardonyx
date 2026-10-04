@@ -10,12 +10,14 @@
 // with git provenance.
 //
 // Provenance semantics in a shallow clone: the depth-1 clone contains
-// only the HEAD commit it resolved to, so the per-file `git log -1`
-// (docs/PLAN.md §5.2) attributes *every* file to that commit's SHA and
-// committer time — a safe upper bound on the file's true last-modified
-// time (never stale, at worst conservative for Onyx's freshness check).
-// The per-file `git log` is the general form: deepening the clone in
-// the future yields exact per-file provenance without further changes.
+// only the HEAD commit it resolved to, and every tracked file is in
+// that commit, so a single `git log -1 HEAD` call (docs/PLAN.md §5.2)
+// attributes *every* file to that commit's SHA and committer time — a
+// safe upper bound on the file's true last-modified time (never stale,
+// at worst conservative for Onyx's freshness check) without one
+// subprocess per file. The per-file `git log -1 -- <path>` form is
+// kept as the fallback for a failed HEAD resolution and becomes the
+// exact-provenance form if the clone is ever deepened.
 //
 // The origin is normalized before cloning: https:// URLs are used as-is
 // (the token-injection point is preserved), git@host: ssh URLs are
@@ -356,12 +358,14 @@ type GitResult struct {
 // Cloning runs `git clone --depth 1 [--branch <ref>] <url> <tmp>` into
 // a fresh temporary directory that is removed on exit. Discovery uses
 // `git ls-files` on the clone (tracked files only — the repository's
-// own .gitignore is respected for free). Each file's provenance is
-// obtained per file via `git log -1 -- <path>` (docs/PLAN.md §5.2):
-// because the depth-1 clone contains only the resolved HEAD commit,
-// every file is attributed to that commit — CommitSHA and
-// DocUpdatedAt (UTC) — a safe upper bound on the file's true
-// last-modified time (see the file comment). Files that are oversize,
+// own .gitignore is respected for free). Every file's provenance comes
+// from a single `git log -1 HEAD` call (docs/PLAN.md §5.2): because the
+// depth-1 clone contains only the resolved HEAD commit, and every
+// tracked file is in it, all files are attributed to that commit —
+// CommitSHA and DocUpdatedAt (UTC) — a safe upper bound on the file's
+// true last-modified time (see the file comment). The per-file
+// `git log -1 -- <path>` form is the fallback if the HEAD resolution
+// fails. Files that are oversize,
 // binary (NUL bytes), or empty are skipped with a warning and counted
 // in GitResult.Skipped by the shared pipeline (collect) that Local runs
 // too; UTF-8 repair applies the same way.
@@ -472,18 +476,37 @@ func resolveBranch(dir string) string {
 	return branch
 }
 
+// headCommit returns the clone's HEAD commit — the single commit a
+// --depth 1 clone contains — resolved with one `git log -1 HEAD` call.
+// In v1 it is the provenance *every* candidate file gets: since the
+// clone's visible history is that one commit and every tracked file is
+// in it, the result is identical to a per-file `git log -1 -- <path>`
+// for all of them, without one process spawn per file
+// (docs/PLAN.md §5.2).
+func headCommit(dir string) (string, time.Time, error) {
+	return runGitLog(dir, "HEAD")
+}
+
 // lastCommit returns what `git log -1 -- <path>` reports in the clone
 // for rel — the latest commit in the clone's visible history touching
-// the path (with a depth-1 clone, the resolved HEAD commit for every
-// file) — plus that commit's committer time (UTC), which becomes the
-// file's DocUpdatedAt (docs/PLAN.md §5.2). One `git log` call per file
-// is acceptable for v1; batching is a future optimization.
+// the path, plus that commit's committer time (UTC), which becomes the
+// file's DocUpdatedAt (docs/PLAN.md §5.2). It is the general per-file
+// form: the fallback when the HEAD resolution fails, and the
+// exact-provenance form if the clone is ever deepened past depth 1.
 func lastCommit(dir, rel string) (string, time.Time, error) {
+	return runGitLog(dir, "--", rel)
+}
+
+// runGitLog runs `git log -1 --format=%H%x00%ct` in dir with the given
+// extra arguments (a revision such as HEAD, or a `-- <path>`
+// restriction) and parses the output into the commit SHA and its
+// committer time (UTC).
+func runGitLog(dir string, args ...string) (string, time.Time, error) {
 	// %x00 puts a NUL between the SHA and the unix timestamp, so
 	// neither can be confused for part of the other.
-	cmd := exec.Command("git", "-c", "core.quotePath=off", "-C", dir,
-		"log", "-1", "--format=%H%x00%ct", "--", rel)
-	out, err := cmd.Output()
+	gitArgs := append([]string{"-c", "core.quotePath=off", "-C", dir,
+		"log", "-1", "--format=%H%x00%ct"}, args...)
+	out, err := exec.Command("git", gitArgs...).Output()
 	if err != nil {
 		var ee *exec.ExitError
 		if errors.As(err, &ee) && len(ee.Stderr) > 0 {
@@ -491,6 +514,12 @@ func lastCommit(dir, rel string) (string, time.Time, error) {
 		}
 		return "", time.Time{}, err
 	}
+	return parseCommit(out)
+}
+
+// parseCommit parses a `git log -1 --format=%H%x00%ct` line into the
+// commit SHA and its committer time (UTC).
+func parseCommit(out []byte) (string, time.Time, error) {
 	line := strings.TrimSpace(string(out))
 	parts := strings.SplitN(line, "\x00", 2)
 	if len(parts) != 2 {
@@ -504,20 +533,28 @@ func lastCommit(dir, rel string) (string, time.Time, error) {
 }
 
 // collectGitFiles turns candidate relative paths into git IngestedFile
-// records via the shared pipeline (collect). The build closure supplies the
-// git provenance: it calls lastCommit to obtain the resolved commit's SHA
-// and committer time (the file's DocUpdatedAt) and builds the GitHub blob
-// URL for github.com origins. On a lastCommit failure it warns — with any
-// secrets redacted — and returns an error, which collect counts as a skip,
-// the same "skipping file without commit metadata" drop as before. See
-// collect for the check order and skip semantics.
+// records via the shared pipeline (collect). A --depth 1 clone
+// contains exactly one commit, and every candidate file is in it, so
+// the build closure attributes every file from a single HEAD-commit
+// resolution (headCommit) rather than one `git log` spawn per file;
+// lastCommit, the general per-file form, is the fallback if that
+// resolution fails — and the exact-provenance form if the clone is
+// ever deepened (docs/PLAN.md §5.2). On a provenance failure it warns
+// — with any secrets redacted — and returns an error, which collect
+// counts as a skip, the same "skipping file without commit metadata"
+// drop as before. See collect for the check order and skip semantics.
 func collectGitFiles(root string, norm NormalizedURL, branch string, candidates []string, f Filter, log *slog.Logger, secrets []string) ([]models.IngestedFile, int) {
+	headSHA, headTime, headErr := headCommit(root)
 	return collect(root, candidates, f, log, func(rel string, _ os.FileInfo, content string) (models.IngestedFile, error) {
-		sha, committedAt, err := lastCommit(root, rel)
-		if err != nil {
-			log.Warn("skipping file without commit metadata", "path", rel,
-				"error", redact(err.Error(), secrets...))
-			return models.IngestedFile{}, err
+		sha, committedAt := headSHA, headTime
+		if headErr != nil {
+			var err error
+			sha, committedAt, err = lastCommit(root, rel)
+			if err != nil {
+				log.Warn("skipping file without commit metadata", "path", rel,
+					"error", redact(err.Error(), secrets...))
+				return models.IngestedFile{}, err
+			}
 		}
 		return models.IngestedFile{
 			Kind:         models.KindGit,
