@@ -676,6 +676,15 @@ type discovery struct {
 // (config.ErrConfiguration, exit 2); a clone failure, a missing git
 // binary, and the like are runtime errors (exit 1).
 func discover(src string, p *ingestFlags, settings *config.Settings, log *slog.Logger) (*discovery, error) {
+	// The one shared filter both sources apply to their candidates
+	// (docs/PLAN.md §5): built once here and used in both branches below.
+	filter := source.Filter{
+		Include:        p.include,
+		Exclude:        p.exclude,
+		MaxDepth:       p.maxDepth,
+		MaxFileSizeKiB: p.maxFileSize,
+	}
+
 	fi, statErr := os.Stat(src)
 	if statErr == nil && fi.IsDir() {
 		if p.branch != "" {
@@ -684,12 +693,7 @@ func discover(src string, p *ingestFlags, settings *config.Settings, log *slog.L
 		if p.token != "" {
 			log.Warn("--token applies to git sources only; ignoring it for a local directory")
 		}
-		res, err := source.Local(src, source.LocalOptions{
-			Include:        p.include,
-			Exclude:        p.exclude,
-			MaxDepth:       p.maxDepth,
-			MaxFileSizeKiB: p.maxFileSize,
-		}, log)
+		res, err := source.Local(src, filter, log)
 		if err != nil {
 			return nil, err
 		}
@@ -726,10 +730,10 @@ func discover(src string, p *ingestFlags, settings *config.Settings, log *slog.L
 	}
 
 	res, err := source.Git(src, source.GitOptions{
-		Include:        p.include,
-		Exclude:        p.exclude,
-		MaxDepth:       p.maxDepth,
-		MaxFileSizeKiB: p.maxFileSize,
+		Include:        filter.Include,
+		Exclude:        filter.Exclude,
+		MaxDepth:       filter.MaxDepth,
+		MaxFileSizeKiB: filter.MaxFileSizeKiB,
 		Branch:         p.branch,
 		Token:          settings.GitToken,
 	}, log)

@@ -19,7 +19,6 @@
 package source
 
 import (
-	"bytes"
 	"errors"
 	"fmt"
 	"io/fs"
@@ -28,7 +27,6 @@ import (
 	"os/exec"
 	"path/filepath"
 	"slices"
-	"sort"
 	"strings"
 	"unicode/utf8"
 
@@ -51,28 +49,11 @@ var defaultNoiseDirs = []string{
 	".venv", "__pycache__", ".idea", ".github",
 }
 
-// LocalOptions configures Local. Every field is optional; zero values mean
-// "no filter / no limit":
-//
-//   - Include: doublestar globs. When non-empty, only files matching at
-//     least one pattern are returned.
-//   - Exclude: doublestar globs, on top of the default noise-dir
-//     exclusions (walk mode).
-//   - MaxDepth: max number of path components in the file's path relative
-//     to the source root — depth 1 is a file directly under the root;
-//     0 = unlimited.
-//   - MaxFileSizeKiB: files strictly larger than this size in KiB are
-//     skipped with a warning; 0 = unlimited.
-//
-// Globs are matched case-sensitively against the file path relative to the
-// source root with forward slashes: `*` does not cross path separators,
-// `**` does (docs/PLAN.md §5.3).
-type LocalOptions struct {
-	Include        []string
-	Exclude        []string
-	MaxDepth       int
-	MaxFileSizeKiB int
-}
+// LocalOptions is the local source's discovery filter. It is the shared
+// Filter (collect.go): the local source uses exactly the shared
+// include/exclude/depth/size semantics (docs/PLAN.md §5.3), so it reuses
+// the type directly rather than duplicating the fields.
+type LocalOptions = Filter
 
 // LocalResult is Local's output: the discovered files, sorted by RelPath,
 // the source's default ID base — the source root's cleaned absolute
@@ -125,13 +106,8 @@ func Local(dir string, opts LocalOptions, log *slog.Logger) (*LocalResult, error
 		return nil, configError("invalid source path %q: not a directory", dir)
 	}
 
-	patterns := make([]string, 0, len(opts.Include)+len(opts.Exclude))
-	patterns = append(patterns, opts.Include...)
-	patterns = append(patterns, opts.Exclude...)
-	for _, pattern := range patterns {
-		if !doublestar.ValidatePattern(pattern) {
-			return nil, configError("invalid glob %q", pattern)
-		}
+	if err := opts.validate(); err != nil {
+		return nil, err
 	}
 
 	var candidates []string
@@ -209,7 +185,8 @@ func gitListMarkdown(root string) ([]string, error) {
 // walkMarkdown lists the Markdown files under root via filepath.WalkDir,
 // returning slash-separated paths relative to root. The default noise-dir
 // exclusions and MaxDepth pruning are applied during the walk; the
-// include/exclude globs and the per-file filters run in collectFiles.
+// include/exclude globs and the per-file filters run in the shared pipeline
+// (collect, via collectFiles).
 func walkMarkdown(root string, opts LocalOptions, log *slog.Logger) []string {
 	// filepath.WalkDir Lstats its root, which would treat a symlinked root
 	// as a plain file. Walk the target instead; relative paths are
@@ -259,68 +236,22 @@ func walkMarkdown(root string, opts LocalOptions, log *slog.Logger) []string {
 	return files
 }
 
-// collectFiles turns candidate relative paths into IngestedFile records.
-// Files out of scope for MaxDepth, Include, or Exclude are dropped
-// silently — they are deliberate scoping — while oversize, binary, and
-// empty skips are warnings. The returned count is the number of files
-// dropped by a per-file check (the "skipped" of the run summary,
-// docs/PLAN.md §8). The files are sorted by RelPath.
-func collectFiles(root, rootLabel string, candidates []string, opts LocalOptions, log *slog.Logger) ([]models.IngestedFile, int) {
-	var files []models.IngestedFile
-	var skipped int
-	maxBytes := int64(opts.MaxFileSizeKiB) * 1024
-	for _, rel := range candidates {
-		if opts.MaxDepth > 0 && pathDepth(rel) > opts.MaxDepth {
-			continue
-		}
-		if !passesInclude(rel, opts.Include) {
-			continue
-		}
-		if matchesAny(rel, opts.Exclude) {
-			continue
-		}
-
-		path := filepath.Join(root, filepath.FromSlash(rel))
-		fi, err := os.Stat(path)
-		if err != nil {
-			skipped++
-			log.Warn("skipping unreadable file", "path", rel, "error", err)
-			continue
-		}
-		if maxBytes > 0 && fi.Size() > maxBytes {
-			skipped++
-			log.Warn("skipping file larger than max file size", "path", rel,
-				"sizeKiB", fi.Size()/1024, "maxKiB", opts.MaxFileSizeKiB)
-			continue
-		}
-		raw, err := os.ReadFile(path)
-		if err != nil {
-			skipped++
-			log.Warn("skipping unreadable file", "path", rel, "error", err)
-			continue
-		}
-		if bytes.IndexByte(raw, 0) >= 0 {
-			skipped++
-			log.Warn("skipping binary file (contains NUL bytes)", "path", rel)
-			continue
-		}
-		content := repairUTF8(raw)
-		if strings.TrimSpace(content) == "" {
-			// "Empty" means zero-length or whitespace-only content.
-			skipped++
-			log.Warn("skipping empty file (zero-length or whitespace-only)", "path", rel)
-			continue
-		}
-		files = append(files, models.IngestedFile{
+// collectFiles turns candidate relative paths into local IngestedFile
+// records via the shared pipeline (collect). The build closure supplies the
+// local provenance: DocUpdatedAt is the file's mtime (UTC), with CommitSHA
+// and BlobURL left empty — the input type (a directory) decides the kind,
+// even when the directory sits inside a git repository (docs/PLAN.md §5.4).
+// See collect for the check order and skip semantics.
+func collectFiles(root, rootLabel string, candidates []string, f Filter, log *slog.Logger) ([]models.IngestedFile, int) {
+	return collect(root, candidates, f, log, func(rel string, fi os.FileInfo, content string) (models.IngestedFile, error) {
+		return models.IngestedFile{
 			Kind:         models.KindLocal,
 			RootLabel:    rootLabel,
 			RelPath:      rel,
 			Content:      content,
 			DocUpdatedAt: fi.ModTime().UTC(),
-		})
-	}
-	sort.Slice(files, func(i, j int) bool { return files[i].RelPath < files[j].RelPath })
-	return files, skipped
+		}, nil
+	})
 }
 
 // passesInclude reports whether rel passes the include filter: it passes

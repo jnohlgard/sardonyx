@@ -32,9 +32,11 @@
 // credentials —, the branch the clone resolved to, and the number of
 // files dropped by a per-file check (Skipped, for the run summary).
 //
-// GitOptions mirrors LocalOptions: the same include/exclude globs
-// (matched case-sensitively against the slash-separated path relative
-// to the repository root), max depth, and max file size apply to the
-// git source as well, so the pipeline (task T7) treats both sources
-// uniformly; Branch and Token are the git-specific additions.
+// Both sources share one Filter (collect.go) for the include/exclude globs
+// (matched case-sensitively against the slash-separated path relative to
+// the source root), the max depth, and the max file size, so the pipeline
+// (task T7) treats them uniformly: LocalOptions is that Filter directly,
+// and GitOptions adds the git-specific Branch and Token on top. The shared
+// per-file pipeline (the filter plus the stat/size/read/NUL/empty checks)
+// lives in collect, so both sources skip files identically.
 package source

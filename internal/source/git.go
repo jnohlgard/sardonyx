@@ -27,7 +27,6 @@
 package source
 
 import (
-	"bytes"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -35,12 +34,9 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"sort"
 	"strconv"
 	"strings"
 	"time"
-
-	"github.com/bmatcuk/doublestar/v4"
 
 	"sardonyx/internal/models"
 )
@@ -308,13 +304,14 @@ func redact(text string, secrets ...string) string {
 
 // GitOptions configures Git.
 //
-// The filter fields mirror LocalOptions exactly — a deliberate decision
+// Its Include, Exclude, MaxDepth, and MaxFileSizeKiB fields are the same
+// shared discovery filter as the local source — a deliberate decision
 // (docs/PLAN.md §5.2/§5.3): the include/exclude doublestar globs match
-// case-sensitively against the file path relative to the repository
-// root with forward slashes (`*` stays within one level, `**` crosses
-// levels), MaxDepth counts path components (depth 1 is directly under
-// the root; 0 is unlimited), and MaxFileSizeKiB = 0 is unlimited. The
-// pipeline (task T7) therefore treats both sources uniformly.
+// case-sensitively against the file path relative to the repository root
+// with forward slashes (`*` stays within one level, `**` crosses levels),
+// MaxDepth counts path components (depth 1 is directly under the root; 0
+// is unlimited), and MaxFileSizeKiB = 0 is unlimited. filter() yields that
+// shared Filter so Git and Local run the identical pipeline (collect).
 //
 // The git-specific fields:
 //
@@ -329,6 +326,18 @@ type GitOptions struct {
 	MaxFileSizeKiB int
 	Branch         string
 	Token          string
+}
+
+// filter returns the shared Filter that the discovery pipeline (collect)
+// applies, built from GitOptions' four filter fields. The git-specific
+// Branch and Token are left out — they configure cloning, not filtering.
+func (o GitOptions) filter() Filter {
+	return Filter{
+		Include:        o.Include,
+		Exclude:        o.Exclude,
+		MaxDepth:       o.MaxDepth,
+		MaxFileSizeKiB: o.MaxFileSizeKiB,
+	}
 }
 
 // GitResult is Git's output, mirroring LocalResult: the discovered
@@ -370,7 +379,8 @@ type GitResult struct {
 // DocUpdatedAt (UTC) — a safe upper bound on the file's true
 // last-modified time (see the file comment). Files that are oversize,
 // binary (NUL bytes), or empty are skipped with a warning and counted
-// in GitResult.Skipped, as in Local; UTF-8 repair applies the same way.
+// in GitResult.Skipped by the shared pipeline (collect) that Local runs
+// too; UTF-8 repair applies the same way.
 //
 // Record shape: Kind=git, RootLabel=the origin's "owner/repo" (or the
 // path's basename for a local clone), RelPath slash-separated,
@@ -413,11 +423,9 @@ func Git(src string, opts GitOptions, log *slog.Logger) (*GitResult, error) {
 		return nil, configError("invalid git source %q: %v", src, err)
 	}
 
-	patterns := append(append([]string{}, opts.Include...), opts.Exclude...)
-	for _, pattern := range patterns {
-		if !doublestar.ValidatePattern(pattern) {
-			return nil, configError("invalid glob %q", pattern)
-		}
+	f := opts.filter()
+	if err := f.validate(); err != nil {
+		return nil, err
 	}
 
 	if _, err := exec.LookPath("git"); err != nil {
@@ -453,7 +461,7 @@ func Git(src string, opts GitOptions, log *slog.Logger) (*GitResult, error) {
 		return nil, fmt.Errorf("discovering files in the clone: %s", redact(err.Error(), secrets...))
 	}
 
-	files, skipped := collectGitFiles(tmp, norm, branch, candidates, opts, log, secrets)
+	files, skipped := collectGitFiles(tmp, norm, branch, candidates, f, log, secrets)
 	return &GitResult{
 		IDBase:  norm.IDBase,
 		Branch:  branch,
@@ -511,69 +519,23 @@ func lastCommit(dir, rel string) (string, time.Time, error) {
 	return parts[0], time.Unix(ts, 0).UTC(), nil
 }
 
-// collectGitFiles turns candidate relative paths into git
-// IngestedFile records, mirroring collectFiles: files out of scope for
-// MaxDepth, Include, or Exclude are dropped silently (deliberate
-// scoping) while oversize, binary, and empty skips are warnings. The
-// returned count is the number of files dropped by a per-file check
-// (the "skipped" of the run summary, docs/PLAN.md §8). The files are
-// sorted by RelPath.
-func collectGitFiles(root string, norm NormalizedURL, branch string, candidates []string, opts GitOptions, log *slog.Logger, secrets []string) ([]models.IngestedFile, int) {
-	var files []models.IngestedFile
-	var skipped int
-	maxBytes := int64(opts.MaxFileSizeKiB) * 1024
-	for _, rel := range candidates {
-		if opts.MaxDepth > 0 && pathDepth(rel) > opts.MaxDepth {
-			continue
-		}
-		if !passesInclude(rel, opts.Include) {
-			continue
-		}
-		if matchesAny(rel, opts.Exclude) {
-			continue
-		}
-
-		path := filepath.Join(root, filepath.FromSlash(rel))
-		fi, err := os.Stat(path)
-		if err != nil {
-			skipped++
-			log.Warn("skipping unreadable file", "path", rel, "error", err)
-			continue
-		}
-		if maxBytes > 0 && fi.Size() > maxBytes {
-			skipped++
-			log.Warn("skipping file larger than max file size", "path", rel,
-				"sizeKiB", fi.Size()/1024, "maxKiB", opts.MaxFileSizeKiB)
-			continue
-		}
-		raw, err := os.ReadFile(path)
-		if err != nil {
-			skipped++
-			log.Warn("skipping unreadable file", "path", rel, "error", err)
-			continue
-		}
-		if bytes.IndexByte(raw, 0) >= 0 {
-			skipped++
-			log.Warn("skipping binary file (contains NUL bytes)", "path", rel)
-			continue
-		}
-		content := repairUTF8(raw)
-		if strings.TrimSpace(content) == "" {
-			// "Empty" means zero-length or whitespace-only content.
-			skipped++
-			log.Warn("skipping empty file (zero-length or whitespace-only)", "path", rel)
-			continue
-		}
-
+// collectGitFiles turns candidate relative paths into git IngestedFile
+// records via the shared pipeline (collect). The build closure supplies the
+// git provenance: it calls lastCommit to obtain the resolved commit's SHA
+// and committer time (the file's DocUpdatedAt) and builds the GitHub blob
+// URL for github.com origins. On a lastCommit failure it warns — with any
+// secrets redacted — and returns an error, which collect counts as a skip,
+// the same "skipping file without commit metadata" drop as before. See
+// collect for the check order and skip semantics.
+func collectGitFiles(root string, norm NormalizedURL, branch string, candidates []string, f Filter, log *slog.Logger, secrets []string) ([]models.IngestedFile, int) {
+	return collect(root, candidates, f, log, func(rel string, _ os.FileInfo, content string) (models.IngestedFile, error) {
 		sha, committedAt, err := lastCommit(root, rel)
 		if err != nil {
-			skipped++
 			log.Warn("skipping file without commit metadata", "path", rel,
 				"error", redact(err.Error(), secrets...))
-			continue
+			return models.IngestedFile{}, err
 		}
-
-		files = append(files, models.IngestedFile{
+		return models.IngestedFile{
 			Kind:         models.KindGit,
 			RootLabel:    norm.Repo,
 			RelPath:      rel,
@@ -581,8 +543,6 @@ func collectGitFiles(root string, norm NormalizedURL, branch string, candidates 
 			DocUpdatedAt: committedAt,
 			CommitSHA:    sha,
 			BlobURL:      norm.sectionLink(branch, rel),
-		})
-	}
-	sort.Slice(files, func(i, j int) bool { return files[i].RelPath < files[j].RelPath })
-	return files, skipped
+		}, nil
+	})
 }
