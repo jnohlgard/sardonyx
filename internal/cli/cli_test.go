@@ -1017,10 +1017,10 @@ func checkHappyServer(t *testing.T) *mockCheck {
 }
 
 // TestRunCheckHappy: a healthy environment exits 0 — the report lines
-// (one per probe, then the summary header) go to stderr, stdout stays
-// empty, exactly one request is made per probe (GET only; the Bearer
-// header is on probes 2 and 3, not on health), and the server never
-// received a document-shaped POST (docs/PLAN.md §13.4, §13.5).
+// (one per probe, then the final verdict line) go to stderr, stdout
+// stays empty, exactly one request is made per probe (GET only; the
+// Bearer header is on probes 2 and 3, not on health), and the server
+// never received a document-shaped POST (docs/PLAN.md §13.4, §13.5).
 func TestRunCheckHappy(t *testing.T) {
 	setEnv(t, "test-check-key", "7", "")
 	mock := checkHappyServer(t)
@@ -1061,14 +1061,61 @@ func TestRunCheckHappy(t *testing.T) {
 		"health ok",
 		"API key accepted — 2 documents visible via the ingestion API",
 		"cc-pair 7: My Docs — ACTIVE, 12 documents indexed",
-		"check complete: reachable, key ok, cc-pair verified in",
+		"OK: all checks passed in",
 	} {
 		if line := lineContaining(stderrS, want); line == "" {
 			t.Errorf("no report line %q; stderr:\n%s", want, stderrS)
 		}
 	}
-	header := lineContaining(stderrS, "check complete: reachable, key ok, cc-pair verified in")
-	assertElapsed(t, header)
+	verdict := lineContaining(stderrS, "OK: all checks passed in")
+	assertElapsed(t, verdict)
+}
+
+// TestRunCheckWarnings: a degraded-but-passing environment (docs/PLAN.md
+// §13.4, §13.5): health inconclusive (404 — the key probe doubles as
+// the reachability test), the key accepted only via the 2f fallback
+// (GET 404 → POST 400, the body rejected), and the cc-pair probe unable
+// to confirm the id (a 404 in the fallback flow is not an error) →
+// exit 0 with a warning per degraded probe, and the final verdict
+// names the warning count: "OK: all required checks passed in …
+// (3 warnings above)".
+func TestRunCheckWarnings(t *testing.T) {
+	setEnv(t, "test-check-key", "7", "")
+	mock := newMockCheck(t, func(method, path string, n int) (int, string) {
+		switch {
+		case method == http.MethodGet && path == "/health":
+			return 404, `{"detail":"not found"}`
+		case method == http.MethodGet && path == "/onyx-api/ingestion":
+			return 404, `{"detail":"not found"}`
+		case method == http.MethodPost && path == "/onyx-api/ingestion":
+			return 400, `{"detail":"document is required"}`
+		case method == http.MethodGet && path == "/manage/admin/cc-pair/7":
+			return 404, `{"detail":"not found"}`
+		}
+		return 404, `{"detail":"not found"}`
+	})
+
+	code, out, stderr := runSard(t, "check", "--api-url", mock.ts.URL, "--log-level", "info")
+	if code != 0 {
+		t.Fatalf("exit = %d, want 0; stderr:\n%s", code, stderr)
+	}
+	if len(out) != 0 {
+		t.Fatalf("stdout is not empty (check prints no JSON): %q", out)
+	}
+	stderrS := string(stderr)
+	for _, want := range []string{
+		"health check inconclusive",
+		"API key accepted via the POST fallback",
+		"cc-pair 7 not validated (best-effort probe)",
+		"OK: all required checks passed in",
+		"(3 warnings above)",
+	} {
+		if line := lineContaining(stderrS, want); line == "" {
+			t.Errorf("no line %q; stderr:\n%s", want, stderrS)
+		}
+	}
+	verdict := lineContaining(stderrS, "OK: all required checks passed in")
+	assertElapsed(t, verdict)
 }
 
 // TestRunCheckFailures: every exit-2 case of sard check

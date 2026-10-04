@@ -931,17 +931,26 @@ stderr; stdout stays empty (check prints no JSON).
 
 ### 13.5 Report
 
-One info line per probe, then a summary header (house style, §8) — all on
-stderr:
+One line per probe (info when the probe passed, a warning when it
+degraded) — all on stderr through the run's logger — then a final
+verdict line summarizing the result. The verdict is plain (no
+time=/level= log prefix) so the outcome reads at a glance:
 
 ```
 time=... level=INFO msg="Onyx at https://cloud.onyx.app/api: health ok"
 time=... level=INFO msg="API key accepted — 23 documents visible via the ingestion API"
 time=... level=INFO msg="cc-pair 243: My Docs — ACTIVE, 12 documents indexed"
-time=... level=INFO msg="check complete: reachable, key ok, cc-pair verified in 1.84s"
+OK: all checks passed in 1.84s
 ```
 
-A failed check prints no summary header — a single actionable error
+When the exit-0 pass carried warnings (an inconclusive health, the 2f
+fallback, an unvalidated cc-pair), the verdict says so with the
+warning count: `OK: all required checks passed in 1.84s (2 warnings
+above)`. The count matches the warning lines the report printed. The
+verdict is written straight to stderr (not through the logger) so it
+appears at every `--log-level`.
+
+A failed check prints no verdict line — a single actionable error
 line, then the exit code (the same shape as the ingest auth fail-fast).
 A run that used the fallback (2f) adds a note to its key line (the
 caveat of §13.3, visible in the output).

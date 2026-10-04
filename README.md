@@ -132,8 +132,11 @@ sard check
    and the number of indexed documents.
 
 When it exits `0`, the first real run cannot fail on an environmental
-problem. A failing check prints a single actionable error line; the
-common failure modes:
+problem. The report ends with a plain verdict line so the result reads
+at a glance — `OK: all checks passed in …`, or, when a probe degraded,
+`OK: all required checks passed in … (N warnings above)`, one warning
+line per caveat. A failing check prints a single actionable error line
+instead; the common failure modes:
 
 - **exit 1 — unreachable**: the server at `ONYX_API_URL` did not answer
   — a wrong host or a misconfigured URL (a missing trailing `/api` is

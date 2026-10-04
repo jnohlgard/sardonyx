@@ -88,8 +88,10 @@
 //   - 130 — interrupted (Ctrl-C).
 //
 // Like ingest, check prints everything to stderr — one line per probe,
-// then a summary header on success, or a single actionable error line
-// on failure — and stdout stays empty.
+// then a final verdict line on success (plain, no log prefix:
+// "OK: all checks passed in …", or, when the pass carried warnings,
+// "OK: all required checks passed in … (N warnings above)"), or a
+// single actionable error line on failure — and stdout stays empty.
 //
 // sard ls (docs/PLAN.md §14) maps its own exit codes:
 //
@@ -888,7 +890,7 @@ func runDry(ctx context.Context, files []models.IngestedFile, docSource string, 
 // configuration exactly as a real run does (config.Resolve with
 // DryRun: false — the point of the command), run the three probes
 // under a signal-aware context, and print the report. A failed check
-// prints no summary header: a single actionable error line, then the
+// prints no verdict line: a single actionable error line, then the
 // exit code (the same shape as the ingest auth fail-fast).
 func runCheck(p *checkFlags) int {
 	log, err := buildLogger(p.logLevel)
@@ -935,20 +937,27 @@ func runCheck(p *checkFlags) int {
 
 // printCheckReport renders the check's report (docs/PLAN.md §13.5):
 // one line per probe — all on stderr through the run's logger — then
-// the summary header. The happy line for each probe is info; a
-// degraded health, a key verified via the 2f fallback (with the §13.3
-// caveat, visible in the output), and an unvalidated cc-pair get a
-// warning, so the verdict can be read with its caveats.
+// a final verdict line. The verdict is plain (no time=/level= log
+// prefix, so it reads at a glance at the end of the report):
+// "OK: all checks passed in …" when every probe passed, or
+// "OK: all required checks passed in … (N warnings above)" when the
+// exit-0 pass carried warnings (a degraded health, a key verified via
+// the 2f fallback, an unvalidated cc-pair) — the warning count matches
+// the warning lines the report printed. It is written straight to
+// stderr (not through the logger) so it appears at every log level.
 func printCheckReport(res onyx.CheckResult, settings *config.Settings, elapsed time.Duration, log *slog.Logger) {
+	warnings := 0
 	if res.Healthy {
 		log.Info(fmt.Sprintf("Onyx at %s: health ok", settings.APIURL))
 	} else {
 		log.Warn(fmt.Sprintf("Onyx at %s: health check inconclusive (no 200 with success=true); continuing — the key probe doubles as the reachability test", settings.APIURL))
+		warnings++
 	}
 
 	if res.UsedFallback {
 		log.Info("API key accepted via the POST fallback (the GET /onyx-api/ingestion endpoint is unavailable on this deployment)")
 		log.Warn("caveat: the key was verified with a deliberately-invalid body; a deployment that validates the body before auth could have misreported a bad key (docs/PLAN.md §13.3)")
+		warnings++
 	} else {
 		log.Info(fmt.Sprintf("API key accepted — %d %s visible via the ingestion API", res.DocCount, plural(res.DocCount, "document")))
 	}
@@ -957,13 +966,14 @@ func printCheckReport(res onyx.CheckResult, settings *config.Settings, elapsed t
 		log.Info(ccPairLine(cp))
 	} else {
 		log.Warn(fmt.Sprintf("cc-pair %d not validated (best-effort probe); verify the id in the Admin Panel — a real run with a wrong id would fail silently", settings.CCPairID))
+		warnings++
 	}
 
-	ccState := "cc-pair verified"
-	if res.CCPair == nil {
-		ccState = "cc-pair unverified (warning)"
+	if warnings == 0 {
+		fmt.Fprintf(os.Stderr, "OK: all checks passed in %s\n", elapsed)
+	} else {
+		fmt.Fprintf(os.Stderr, "OK: all required checks passed in %s (%d %s above)\n", elapsed, warnings, plural(warnings, "warning"))
 	}
-	log.Info(fmt.Sprintf("check complete: reachable, key ok, %s in %s", ccState, elapsed))
 }
 
 // runLs runs the list for one `sard ls` invocation and returns the
