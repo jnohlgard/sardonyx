@@ -41,9 +41,10 @@ A small Go CLI tool that:
 
 ### Non-goals (v1)
 
-- **Deleting/pruning** documents from Onyx — the Ingestion API has no delete endpoint, so
-  deleted source files leave stale documents behind. Mitigation is metadata/naming; a future
-  version may call a separate Onyx deletion API if one exists.
+- **Deleting/pruning** documents from Onyx — not implemented in v1: the Ingestion API does
+  have a delete endpoint (`DELETE /onyx-api/ingestion/{document_id}`, see §11 #11), but
+  `sard` never calls it, so deleted source files leave stale documents behind. A future
+  version will wire up deletion/prune against it.
 - Non-Markdown file types (PDF, DOCX, …).
 - Scheduling / continuous sync (a cron job or CI step can invoke the CLI).
 - Image sections (`ImageSection` requires a separate file-store upload round-trip).
@@ -806,7 +807,7 @@ Run with `go test ./...`.
 
 | # | Item | Current call |
 | - | ---- | ------------ |
-| 1 | **Stale documents**: Ingestion API has no delete → removed files persist in Onyx. | Accept for v1; document clearly; future: Onyx document-deletion API or periodic full prune if one exists. |
+| 1 | **Stale documents**: `sard` does not implement deletion → removed files persist in Onyx (the API itself supports `DELETE /onyx-api/ingestion/{document_id}`, #11). | Accept for v1; document clearly; future: implement deletion or a periodic prune against that endpoint (v2 item). |
 | 2 | **CC-pair prerequisite**: user must create a Connector (e.g. a File Connector) in the Admin Panel and read the `cc_pair_id` from the URL. | Documented — the README's Getting started carries the step-by-step walkthrough (T10); the prerequisite itself stays user-side. |
 | 3 | **Cloud rate limits** on `cloud.onyx.app` for bulk ingests. | Sequential + backoff on 429; `--limit` for chunked runs. |
 | 4 | **Tags**: `metadata` values become Onyx tags; free-form values may be noise in UI. | Metadata stays conservative by default; optional user tags via the repeatable `--tag` flag (T13, §10). |
@@ -815,8 +816,8 @@ Run with `go test ./...`.
 | 7 | **`source` enum for non-GitHub/GitLab hosts** (Bitbucket, self-hosted Gitea). | Default `file`; `--source` override available. |
 | 8 | **Very large monorepos**: thousands of md files → long sequential runs. | `--include` scoping + `--limit`; concurrency is a v2 item. |
 | 9 | **Go toolchain on the target machine**: only needed to *build*; the shipped binary is static. | Document build instructions; ship prebuilt binaries for common platforms. |
-| 10 | **Document ID migration**: forks, repo URL changes, and moved local roots change the default ID base → new IDs → previous documents go stale (no delete API, #1). | `--id-base` / `SARD_ID_BASE` override; recommend pinning one canonical base per project (§6). |
-| 11 | **The Ingestion API now lists a delete operation** (reference fetched 2026-10-02, "Delete Ingestion Doc"): the v1 premise that the API has no delete (#1, README limitation) is likely out of date. | v1 stance (no delete; stale documents documented) stands; verify the operation's auth and semantics before any v2 prune work. `sard check` (T11) does not depend on it. |
+| 10 | **Document ID migration**: forks, repo URL changes, and moved local roots change the default ID base → new IDs → previous documents go stale (no deletion implemented in v1, #1). | `--id-base` / `SARD_ID_BASE` override; recommend pinning one canonical base per project (§6). |
+| 11 | **The Ingestion API has a delete operation** — "Delete Ingestion Doc", `DELETE {API_BASE_URL}/onyx-api/ingestion/{document_id}` (reference fetched 2026-10-02, semantics verified 2026-10-04): same Bearer auth and the same `manage:connectors` / `admin` permission as the ingestion `POST` (a Group Manager may call it, limited to the pairs in the groups they manage); `200` on success. The earlier v1 premise that the API has no delete (#1, README limitation) was **wrong** — the gap is on our side. | v1 stance (no deletion implemented; stale documents documented) stands; deletion / periodic prune against this endpoint is a v2 item. `sard check` (T11) does not depend on it. |
 | 12 | **401/403 behind a reverse proxy / WAF**: a fronting proxy can return 401/403 for reasons other than key rejection; the check's advice assumes Onyx itself answered. | No v1 mitigation: the report carries the status code so a human can tell them apart; the hint still names the variable to check. |
 | 13 | **Permission matrix beyond the plain API key**: the check targets the documented key shape (`manage:connectors` / `admin`); a Group Manager key 403s on the *list* endpoint yet may still ingest into the pairs of the groups it manages. | A probe-2 403 falls through to the POST fallback — the endpoint a real run uses — and its verdict wins; probe 3 treats 403/404 (fallback flow) as warnings, not failures. Real runs have the same limitation today (§2). |
 

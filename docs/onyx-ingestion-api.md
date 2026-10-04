@@ -150,11 +150,15 @@ matter to Sardonyx:
   Ingestion `POST` does **not** validate that: a bogus id is accepted, and
   the documents simply never appear on the Connectors page).
   <https://docs.onyx.app/developers/api_reference/files_connectors/get_cc_pair_full_info>
-- **A delete operation** ("Delete Ingestion Doc") now appears in the
-  reference: the v1 premise that the Ingestion API has no delete endpoint
-  (the Implications table below; PLAN.md §11 #1) is likely out of date.
-  Verify the operation's auth and semantics before any v2 deletion/prune
-  work; `sard check` does not depend on it.
+- **`DELETE {API_BASE_URL}/onyx-api/ingestion/{document_id}`** — "Delete
+  Ingestion Doc": removes one document by its `document_id` (the stable id
+  `sard` generates and that `sard ls` lists). Same Bearer auth and the same
+  `manage:connectors` / `admin` permission as the `POST` above (a Group
+  Manager may also call it, limited to the pairs in the groups they
+  manage); `200` on success. **`sard` does not implement this yet** — v1 is
+  upsert-only and stale documents are documented as a limitation — but a
+  future deletion/prune feature is a plain call to this endpoint (PLAN.md
+  §11 #11); `sard check` does not depend on it.
   <https://docs.onyx.app/developers/api_reference/ingestion/delete_ingestion_doc>
 
 Schema drift note: in the current OpenAPI the request body's `cc_pair_id`
@@ -174,4 +178,4 @@ up on the Connectors page, but the API itself accepts `null`.
 | `sections[0].link` | GitHub blob URL when a public GitHub URL was the input, else null |
 | `metadata` | repo, path, commit sha, `ingested_by` |
 | `chunk_count`, owners, images | omitted in v1 |
-| Deletion of removed files | **not supported by the v1 notes** → documented as a limitation. ⚠️ The current reference lists a delete operation — see "Other endpoints" above; the v1 stance stands, flagged for verification in v2 |
+| Deletion of removed files | **not implemented in v1** → documented as a limitation. The API itself supports it — the `DELETE …/ingestion/{document_id}` entry in "Other endpoints" above; deletion/prune is a v2 item (PLAN.md §11 #11) |
