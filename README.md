@@ -254,6 +254,7 @@ internal/
   cli/cli.go             # flags, pipeline orchestration, summary
   config/config.go       # flags > env > .env resolution
   models/models.go       # IngestedFile / IngestResult / OnyxPayload
+  source/collect.go      # shared discovery/skip pipeline (filters + per-file checks)
   source/git.go          # URL normalization, shallow clone, git ls-files
   source/local.go        # directory walk, filters, mtime
   transform/markdown.go  # IngestedFile → Onyx payload
