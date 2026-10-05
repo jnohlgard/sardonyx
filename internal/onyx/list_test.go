@@ -348,15 +348,15 @@ func TestListDocsNeverLeaksKey(t *testing.T) {
 	}
 
 	cases := map[string]func(n int) (int, string){
-		"bare array":    func(n int) (int, string) { return 200, listDocsBody },
-		"envelope":      func(n int) (int, string) { return 200, `{"data":` + listDocsBody + `}` },
-		"empty":         func(n int) (int, string) { return 200, `[]` },
-		"malformed":     func(n int) (int, string) { return 200, `{"foo":"bar"}` },
-		"401":           func(n int) (int, string) { return 401, `{"detail":"unauthorized"}` },
-		"403":           func(n int) (int, string) { return 403, `{"detail":"forbidden"}` },
-		"404":           func(n int) (int, string) { return 404, `{"detail":"not found"}` },
-		"429 exhaust":   func(n int) (int, string) { return 429, `{"detail":"rate limited"}` },
-		"500 exhaust":   func(n int) (int, string) { return 500, `{"error":"boom"}` },
+		"bare array":  func(n int) (int, string) { return 200, listDocsBody },
+		"envelope":    func(n int) (int, string) { return 200, `{"data":` + listDocsBody + `}` },
+		"empty":       func(n int) (int, string) { return 200, `[]` },
+		"malformed":   func(n int) (int, string) { return 200, `{"foo":"bar"}` },
+		"401":         func(n int) (int, string) { return 401, `{"detail":"unauthorized"}` },
+		"403":         func(n int) (int, string) { return 403, `{"detail":"forbidden"}` },
+		"404":         func(n int) (int, string) { return 404, `{"detail":"not found"}` },
+		"429 exhaust": func(n int) (int, string) { return 429, `{"detail":"rate limited"}` },
+		"500 exhaust": func(n int) (int, string) { return 500, `{"error":"boom"}` },
 		"retry then ok": func(n int) (int, string) {
 			if n == 1 {
 				return 429, `{"detail":"rate limited"}`
