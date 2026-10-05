@@ -200,56 +200,52 @@ func (e exitCode) Error() string {
 	return fmt.Sprintf("run finished with exit code %d", int(e))
 }
 
-// rootUsageTemplate is the root command's usage template: the v1.10
-// default minus the Runnable line (root itself takes no arguments or
-// flags — it only dispatches to subcommands, so a "sard [flags]" line
-// would be misleading).
-const rootUsageTemplate = `Usage:{{if .HasAvailableSubCommands}}
-  {{.CommandPath}} [command]{{end}}{{if gt (len .Aliases) 0}}
+// The commands render their usage from cobra's own default template
+// rather than a forked copy. cobra's defaultUsageTemplate is fetched at
+// runtime (cobraDefaultUsageTemplate), so it stays in sync with the
+// cobra version pinned in go.mod by construction; the only
+// cobra-version-sensitive text in this file is the small anchor at each
+// splice point, and TestUsageTemplateAnchors fails if a cobra bump moves
+// it.
+//
+// withUsageSections splices a command's static sections (an Arguments
+// section, an Environment section, or both) into the default template,
+// inside its {{if .Runnable}} block, right below the usage line — the
+// command's Long text is a summary, and the <source> description reads
+// better next to the usage line it documents than at the top of the help
+// output. Each subcommand sets its own template this way because a
+// command inherits its parent's usage template, and the root uses
+// rootUsageTemplate.
+func cobraDefaultUsageTemplate() string {
+	return (&cobra.Command{}).UsageTemplate()
+}
 
-Aliases:
-  {{.NameAndAliases}}{{end}}{{if .HasExample}}
+// withUsageSections returns the usage template for a command carrying
+// static sections (an Arguments section, an Environment section, or both)
+// to be rendered below the usage line and above the Flags section. The
+// sections are spliced into the default template where its usage line
+// ({{.UseLine}}) closes, inside the {{if .Runnable}} block, so they appear
+// only for commands that have a usage line.
+func withUsageSections(sections string) string {
+	const anchor = "{{.UseLine}}{{end}}"
+	return strings.Replace(cobraDefaultUsageTemplate(), anchor,
+		"{{.UseLine}}\n\n"+sections+"{{end}}", 1)
+}
 
-Examples:
-{{.Example}}{{end}}{{if .HasAvailableSubCommands}}{{$cmds := .Commands}}{{if eq (len .Groups) 0}}
+// rootUsageTemplate is cobra's default usage template with the
+// {{if .Runnable}} usage-line block removed: the root takes no arguments
+// or flags of its own — it only dispatches to subcommands, so a "sard
+// [flags]" line would be misleading.
+func rootUsageTemplate() string {
+	const anchor = "{{if .Runnable}}\n  {{.UseLine}}{{end}}"
+	return strings.Replace(cobraDefaultUsageTemplate(), anchor, "", 1)
+}
 
-Available Commands:{{range $cmds}}{{if (or .IsAvailableCommand (eq .Name "help"))}}
-  {{rpad .Name .NamePadding }} {{.Short}}{{end}}{{end}}{{else}}{{range $group := .Groups}}
-
-{{.Title}}{{range $cmds}}{{if (and (eq .GroupID $group.ID) (or .IsAvailableCommand (eq .Name "help")))}}
-  {{rpad .Name .NamePadding }} {{.Short}}{{end}}{{end}}{{end}}{{if not .AllChildCommandsHaveGroup}}
-
-Additional Commands:{{range $cmds}}{{if (and (eq .GroupID "") (or .IsAvailableCommand (eq .Name "help")))}}
-  {{rpad .Name .NamePadding }} {{.Short}}{{end}}{{end}}{{end}}{{end}}{{end}}{{if .HasAvailableLocalFlags}}
-
-Flags:
-{{.LocalFlags.FlagUsages | trimTrailingWhitespaces}}{{end}}{{if .HasAvailableInheritedFlags}}
-
-Global Flags:
-{{.InheritedFlags.FlagUsages | trimTrailingWhitespaces}}{{end}}{{if .HasHelpSubCommands}}
-
-Additional help topics:{{range .Commands}}{{if .IsAdditionalHelpTopicCommand}}
-  {{rpad .CommandPath .CommandPathPadding}} {{.Short}}{{end}}{{end}}{{end}}{{if .HasAvailableSubCommands}}
-
-Use "{{.CommandPath}} [command] --help" for more information about a command.{{end}}
-`
-
-// ingestUsageTemplate is cobra v1.10.2's defaultUsageTemplate plus two
-// hand-written sections below the Usage line: an Arguments section
-// (the command's Long text is a summary, and the <source> description
-// reads better next to the usage line it documents than at the top of
-// the help output) and a static Environment section summarizing the
-// env vars behind the flags (the names must stay in sync with
-// internal/config; TestIngestUsageTemplateEnvNames guards that). It is
-// set explicitly on the ingest command because a command inherits its
-// parent's usage template, and the root uses rootUsageTemplate —
-// without this, the root's trimmed template (no UseLine) would render
-// an empty Usage line for "sard ingest --help". Keep the default part
-// in sync with the cobra version pinned in go.mod.
-const ingestUsageTemplate = `Usage:{{if .Runnable}}
-  {{.UseLine}}
-
-Arguments:
+// ingestUsageSections is the static text spliced into `sard ingest`'s
+// usage, below the usage line: the <source> argument and an Environment
+// summary of the env vars behind the flags (the names must stay in sync
+// with internal/config; TestIngestUsageTemplateEnvNames guards that).
+const ingestUsageSections = `Arguments:
   <source>  A git repository URL (https://host/owner/repo,
             git@host:owner/repo, or the owner/repo shorthand for
             github.com) or a local directory path.
@@ -259,35 +255,25 @@ Environment:
   ONYX_API_KEY     Onyx API key (--api-key)
   ONYX_CC_PAIR_ID  connector-credential pair id (--cc-pair-id)
   GIT_TOKEN        token for private repos (--token)
-  SARD_ID_BASE     document-ID base for the run (--id-base){{end}}{{if .HasAvailableSubCommands}}
-  {{.CommandPath}} [command]{{end}}{{if gt (len .Aliases) 0}}
+  SARD_ID_BASE     document-ID base for the run (--id-base)`
 
-Aliases:
-  {{.NameAndAliases}}{{end}}{{if .HasExample}}
+// checkUsageSections is the static Environment section spliced into
+// `sard check`'s usage: exactly the three Onyx variables behind its flags
+// — no GIT_TOKEN or SARD_ID_BASE, since check has no git or ID-base flags
+// (and no positional argument, so no Arguments section).
+// TestCheckUsageTemplateEnvNames guards the names.
+const checkUsageSections = `Environment:
+  ONYX_API_URL     Onyx API base URL (--api-url)
+  ONYX_API_KEY     Onyx API key (--api-key)
+  ONYX_CC_PAIR_ID  connector-credential pair id (--cc-pair-id)`
 
-Examples:
-{{.Example}}{{end}}{{if .HasAvailableSubCommands}}{{$cmds := .Commands}}{{if eq (len .Groups) 0}}
-
-Available Commands:{{range $cmds}}{{if (or .IsAvailableCommand (eq .Name "help"))}}
-  {{rpad .Name .NamePadding }} {{.Short}}{{end}}{{end}}{{else}}{{range $group := .Groups}}
-
-{{.Title}}{{range $cmds}}{{if (and (eq .GroupID $group.ID) (or .IsAvailableCommand (eq .Name "help")))}}
-  {{rpad .Name .NamePadding }} {{.Short}}{{end}}{{end}}{{end}}{{if not .AllChildCommandsHaveGroup}}
-
-Additional Commands:{{range $cmds}}{{if (and (eq .GroupID "") (or .IsAvailableCommand (eq .Name "help")))}}
-  {{rpad .Name .NamePadding }} {{.Short}}{{end}}{{end}}{{end}}{{end}}{{end}}{{if .HasAvailableLocalFlags}}
-
-Flags:
-{{.LocalFlags.FlagUsages | trimTrailingWhitespaces}}{{end}}{{if .HasAvailableInheritedFlags}}
-
-Global Flags:
-{{.InheritedFlags.FlagUsages | trimTrailingWhitespaces}}{{end}}{{if .HasHelpSubCommands}}
-
-Additional help topics:{{range .Commands}}{{if .IsAdditionalHelpTopicCommand}}
-  {{rpad .CommandPath .CommandPathPadding}} {{.Short}}{{end}}{{end}}{{end}}{{if .HasAvailableSubCommands}}
-
-Use "{{.CommandPath}} [command] --help" for more information about a command.{{end}}
-`
+// lsUsageSections is the static Environment section spliced into `sard
+// ls`'s usage: exactly the two Onyx variables behind its flags — no
+// ONYX_CC_PAIR_ID, since ls takes no cc-pair id.
+// TestLsUsageTemplateEnvNames guards the names.
+const lsUsageSections = `Environment:
+  ONYX_API_URL     Onyx API base URL (--api-url)
+  ONYX_API_KEY     Onyx API key (--api-key)`
 
 // checkFlags holds the parsed state of one `sard check` invocation
 // (docs/PLAN.md §13.1). It is separate from ingestFlags on purpose:
@@ -300,51 +286,6 @@ type checkFlags struct {
 	ccPairID int
 	logLevel string
 }
-
-// checkUsageTemplate is ingestUsageTemplate minus the Arguments
-// section (check takes no positional arguments), with an Environment
-// section listing exactly the three Onyx variables behind its flags —
-// no GIT_TOKEN or SARD_ID_BASE, since check has no git or ID-base
-// flags. TestCheckUsageTemplateEnvNames guards the names. It is set
-// explicitly on the check command because a command inherits its
-// parent's usage template (the root uses rootUsageTemplate, without a
-// UseLine); keep the default part in sync with the cobra version
-// pinned in go.mod.
-const checkUsageTemplate = `Usage:{{if .Runnable}}
-  {{.UseLine}}
-
-Environment:
-  ONYX_API_URL     Onyx API base URL (--api-url)
-  ONYX_API_KEY     Onyx API key (--api-key)
-  ONYX_CC_PAIR_ID  connector-credential pair id (--cc-pair-id){{end}}{{if .HasAvailableSubCommands}}
-  {{.CommandPath}} [command]{{end}}{{if gt (len .Aliases) 0}}
-
-Aliases:
-  {{.NameAndAliases}}{{end}}{{if .HasExample}}
-
-Examples:
-{{.Example}}{{end}}{{if .HasAvailableSubCommands}}{{$cmds := .Commands}}{{if eq (len .Groups) 0}}
-
-Available Commands:{{range $cmds}}{{if (or .IsAvailableCommand (eq .Name "help"))}}
-  {{rpad .Name .NamePadding }} {{.Short}}{{end}}{{end}}{{else}}{{range $group := .Groups}}
-
-{{.Title}}{{range $cmds}}{{if (and (eq .GroupID $group.ID) (or .IsAvailableCommand (eq .Name "help")))}}
-  {{rpad .Name .NamePadding }} {{.Short}}{{end}}{{end}}{{end}}{{if not .AllChildCommandsHaveGroup}}
-
-Additional Commands:{{range $cmds}}{{if (and (eq .GroupID "") (or .IsAvailableCommand (eq .Name "help")))}}
-  {{rpad .Name .NamePadding }} {{.Short}}{{end}}{{end}}{{end}}{{end}}{{end}}{{if .HasAvailableLocalFlags}}
-
-Flags:
-{{.LocalFlags.FlagUsages | trimTrailingWhitespaces}}{{end}}{{if .HasAvailableInheritedFlags}}
-
-Global Flags:
-{{.InheritedFlags.FlagUsages | trimTrailingWhitespaces}}{{end}}{{if .HasHelpSubCommands}}
-
-Additional help topics:{{range .Commands}}{{if .IsAdditionalHelpTopicCommand}}
-  {{rpad .CommandPath .CommandPathPadding}} {{.Short}}{{end}}{{end}}{{end}}{{if .HasAvailableSubCommands}}
-
-Use "{{.CommandPath}} [command] --help" for more information about a command.{{end}}
-`
 
 // newCheckCmd builds the `sard check` subcommand (docs/PLAN.md §13):
 // the four Onyx-side flags bound to p and a RunE wired to runCheck.
@@ -379,7 +320,7 @@ problem; 130 interrupted.`,
 			return nil
 		},
 	}
-	cmd.SetUsageTemplate(checkUsageTemplate)
+	cmd.SetUsageTemplate(withUsageSections(checkUsageSections))
 	f := cmd.Flags()
 	f.StringVar(&p.apiURL, "api-url", "", "Onyx API base URL (default: "+config.DefaultAPIURL+"; env: "+config.EnvAPIURL+")")
 	f.StringVar(&p.apiKey, "api-key", "", "Onyx API key (env: "+config.EnvAPIKey+")")
@@ -398,48 +339,6 @@ type lsFlags struct {
 	apiKey   string
 	logLevel string
 }
-
-// lsUsageTemplate is checkUsageTemplate with an Environment section
-// listing exactly the two Onyx variables behind its flags — no
-// ONYX_CC_PAIR_ID, since ls takes no cc-pair id.
-// TestLsUsageTemplateEnvNames guards the names. It is set explicitly
-// on the ls command because a command inherits its parent's usage
-// template (the root uses rootUsageTemplate, without a UseLine); keep
-// the default part in sync with the cobra version pinned in go.mod.
-const lsUsageTemplate = `Usage:{{if .Runnable}}
-  {{.UseLine}}
-
-Environment:
-  ONYX_API_URL     Onyx API base URL (--api-url)
-  ONYX_API_KEY     Onyx API key (--api-key){{end}}{{if .HasAvailableSubCommands}}
-  {{.CommandPath}} [command]{{end}}{{if gt (len .Aliases) 0}}
-
-Aliases:
-  {{.NameAndAliases}}{{end}}{{if .HasExample}}
-
-Examples:
-{{.Example}}{{end}}{{if .HasAvailableSubCommands}}{{$cmds := .Commands}}{{if eq (len .Groups) 0}}
-
-Available Commands:{{range $cmds}}{{if (or .IsAvailableCommand (eq .Name "help"))}}
-  {{rpad .Name .NamePadding }} {{.Short}}{{end}}{{end}}{{else}}{{range $group := .Groups}}
-
-{{.Title}}{{range $cmds}}{{if (and (eq .GroupID $group.ID) (or .IsAvailableCommand (eq .Name "help")))}}
-  {{rpad .Name .NamePadding }} {{.Short}}{{end}}{{end}}{{end}}{{if not .AllChildCommandsHaveGroup}}
-
-Additional Commands:{{range $cmds}}{{if (and (eq .GroupID "") (or .IsAvailableCommand (eq .Name "help")))}}
-  {{rpad .Name .NamePadding }} {{.Short}}{{end}}{{end}}{{end}}{{end}}{{end}}{{if .HasAvailableLocalFlags}}
-
-Flags:
-{{.LocalFlags.FlagUsages | trimTrailingWhitespaces}}{{end}}{{if .HasAvailableInheritedFlags}}
-
-Global Flags:
-{{.InheritedFlags.FlagUsages | trimTrailingWhitespaces}}{{end}}{{if .HasHelpSubCommands}}
-
-Additional help topics:{{range .Commands}}{{if .IsAdditionalHelpTopicCommand}}
-  {{rpad .CommandPath .CommandPathPadding}} {{.Short}}{{end}}{{end}}{{end}}{{if .HasAvailableSubCommands}}
-
-Use "{{.CommandPath}} [command] --help" for more information about a command.{{end}}
-`
 
 // newLsCmd builds the `sard ls` subcommand (docs/PLAN.md §14): the
 // three flags bound to p and a RunE wired to runLs. The flag
@@ -475,7 +374,7 @@ credentials, or endpoint problem; 130 interrupted.`,
 			return nil
 		},
 	}
-	cmd.SetUsageTemplate(lsUsageTemplate)
+	cmd.SetUsageTemplate(withUsageSections(lsUsageSections))
 	f := cmd.Flags()
 	f.StringVar(&p.apiURL, "api-url", "", "Onyx API base URL (default: "+config.DefaultAPIURL+"; env: "+config.EnvAPIURL+")")
 	f.StringVar(&p.apiKey, "api-key", "", "Onyx API key (env: "+config.EnvAPIKey+")")
@@ -521,7 +420,7 @@ updated — one per line on stdout, and it needs only the API key.`,
 		SilenceUsage:  true,
 		RunE:          func(cmd *cobra.Command, args []string) error { return errNoSubcommand },
 	}
-	root.SetUsageTemplate(rootUsageTemplate)
+	root.SetUsageTemplate(rootUsageTemplate())
 	return root
 }
 
@@ -531,7 +430,7 @@ updated — one per line on stdout, and it needs only the API key.`,
 // --help — cobra renders the usage line and the option list from the
 // same definitions that bind the parsed values. The Long text is a
 // summary; the <source> description lives in the Arguments section of
-// ingestUsageTemplate, below the usage line.
+// ingestUsageSections, below the usage line.
 func newIngestCmd(p *ingestFlags) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "ingest <source>",
@@ -554,7 +453,7 @@ credentials.`,
 			return nil
 		},
 	}
-	cmd.SetUsageTemplate(ingestUsageTemplate)
+	cmd.SetUsageTemplate(withUsageSections(ingestUsageSections))
 	f := cmd.Flags()
 	f.StringVar(&p.apiURL, "api-url", "", "Onyx API base URL (default: "+config.DefaultAPIURL+"; env: "+config.EnvAPIURL+")")
 	f.StringVar(&p.apiKey, "api-key", "", "Onyx API key (env: "+config.EnvAPIKey+")")

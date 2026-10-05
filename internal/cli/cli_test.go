@@ -954,11 +954,12 @@ func TestRunVersion(t *testing.T) {
 	}
 }
 
-// TestIngestUsageTemplateEnvNames guards the static Environment
-// section of ingestUsageTemplate against drift: the section's env var
-// names are hand-written, so each name defined in internal/config must
-// appear in it.
-func TestIngestUsageTemplateEnvNames(t *testing.T) {
+// TestIngestUsageSectionsEnvNames guards the static Environment section
+// of ingestUsageSections against drift: the section's env var names are
+// hand-written, so each name defined in internal/config must appear in
+// the rendered usage template.
+func TestIngestUsageSectionsEnvNames(t *testing.T) {
+	tmpl := withUsageSections(ingestUsageSections)
 	for _, name := range []string{
 		config.EnvAPIURL,
 		config.EnvAPIKey,
@@ -966,8 +967,8 @@ func TestIngestUsageTemplateEnvNames(t *testing.T) {
 		config.EnvGitToken,
 		config.EnvIDBase,
 	} {
-		if !strings.Contains(ingestUsageTemplate, name) {
-			t.Errorf("Environment section of ingestUsageTemplate is missing %s", name)
+		if !strings.Contains(tmpl, name) {
+			t.Errorf("Environment section of the ingest usage is missing %s", name)
 		}
 	}
 }
@@ -1457,27 +1458,28 @@ func TestRunCheckHelp(t *testing.T) {
 	}
 }
 
-// TestCheckUsageTemplateEnvNames guards the static Environment section
-// of checkUsageTemplate against drift, mirroring
-// TestIngestUsageTemplateEnvNames: it lists exactly the three Onyx
+// TestCheckUsageSectionsEnvNames guards the static Environment section
+// of checkUsageSections against drift, mirroring
+// TestIngestUsageSectionsEnvNames: it lists exactly the three Onyx
 // variables — each name defined in internal/config that check has a
 // flag for must appear, and the git/ID-base names must not.
-func TestCheckUsageTemplateEnvNames(t *testing.T) {
+func TestCheckUsageSectionsEnvNames(t *testing.T) {
+	tmpl := withUsageSections(checkUsageSections)
 	for _, name := range []string{
 		config.EnvAPIURL,
 		config.EnvAPIKey,
 		config.EnvCCPairID,
 	} {
-		if !strings.Contains(checkUsageTemplate, name) {
-			t.Errorf("Environment section of checkUsageTemplate is missing %s", name)
+		if !strings.Contains(tmpl, name) {
+			t.Errorf("Environment section of the check usage is missing %s", name)
 		}
 	}
 	for _, name := range []string{
 		config.EnvGitToken,
 		config.EnvIDBase,
 	} {
-		if strings.Contains(checkUsageTemplate, name) {
-			t.Errorf("checkUsageTemplate must not name %s (check has no git or ID-base flags)", name)
+		if strings.Contains(tmpl, name) {
+			t.Errorf("check usage must not name %s (check has no git or ID-base flags)", name)
 		}
 	}
 }
@@ -1810,18 +1812,19 @@ func TestRunLsHelp(t *testing.T) {
 	}
 }
 
-// TestLsUsageTemplateEnvNames guards the static Environment section
-// of lsUsageTemplate against drift, mirroring
-// TestCheckUsageTemplateEnvNames: it lists exactly the two Onyx
+// TestLsUsageSectionsEnvNames guards the static Environment section of
+// lsUsageSections against drift, mirroring
+// TestCheckUsageSectionsEnvNames: it lists exactly the two Onyx
 // variables the ls flags stand on — the cc-pair, git, and ID-base
 // names must not.
-func TestLsUsageTemplateEnvNames(t *testing.T) {
+func TestLsUsageSectionsEnvNames(t *testing.T) {
+	tmpl := withUsageSections(lsUsageSections)
 	for _, name := range []string{
 		config.EnvAPIURL,
 		config.EnvAPIKey,
 	} {
-		if !strings.Contains(lsUsageTemplate, name) {
-			t.Errorf("Environment section of lsUsageTemplate is missing %s", name)
+		if !strings.Contains(tmpl, name) {
+			t.Errorf("Environment section of the ls usage is missing %s", name)
 		}
 	}
 	for _, name := range []string{
@@ -1829,9 +1832,35 @@ func TestLsUsageTemplateEnvNames(t *testing.T) {
 		config.EnvGitToken,
 		config.EnvIDBase,
 	} {
-		if strings.Contains(lsUsageTemplate, name) {
-			t.Errorf("lsUsageTemplate must not name %s (ls takes no cc-pair, git, or ID-base flags)", name)
+		if strings.Contains(tmpl, name) {
+			t.Errorf("ls usage must not name %s (ls takes no cc-pair, git, or ID-base flags)", name)
 		}
+	}
+}
+
+// TestUsageTemplateAnchors guards the usage-template splices against
+// drift from the cobra version pinned in go.mod. withUsageSections and
+// rootUsageTemplate find their splice points by string anchors in
+// cobra's default usage template, and they silently no-op if an anchor
+// stops matching (e.g. a cobra minor bump rewrites
+// defaultUsageTemplate), dropping the sections without any diagnostic.
+// This asserts each anchor occurs exactly once in the live template and
+// that both splices actually changed it.
+func TestUsageTemplateAnchors(t *testing.T) {
+	live := cobraDefaultUsageTemplate()
+
+	if got := strings.Count(live, "{{.UseLine}}{{end}}"); got != 1 {
+		t.Errorf(`anchor "{{.UseLine}}{{end}}" occurs %d times in cobra's default usage template, want 1`, got)
+	}
+	if got := strings.Count(live, "{{if .Runnable}}\n  {{.UseLine}}{{end}}"); got != 1 {
+		t.Errorf(`anchor "{{if .Runnable}}\n  {{.UseLine}}{{end}}" occurs %d times in cobra's default usage template, want 1`, got)
+	}
+
+	if got := withUsageSections("SECTIONS"); !strings.Contains(got, "\n\nSECTIONS{{end}}") {
+		t.Errorf("withUsageSections did not splice the sections into the template:\n%s", got)
+	}
+	if got := rootUsageTemplate(); strings.Contains(got, "{{.UseLine}}") {
+		t.Errorf("rootUsageTemplate still contains a UseLine (the Runnable block was not removed):\n%s", got)
 	}
 }
 
