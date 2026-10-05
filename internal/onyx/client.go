@@ -105,7 +105,7 @@ type Client struct {
 	apiURL  string
 	apiKey  string
 	http    *http.Client
-	backoff []time.Duration // retry waits; tests replace defaultBackoff
+	backoff []time.Duration // retry waits (NewClient: defaultBackoff; tests override)
 }
 
 // NewClient builds a Client for an Onyx API base URL and Bearer
@@ -222,14 +222,10 @@ func (c *Client) attempt(ctx context.Context, body []byte) (models.IngestResult,
 // the number of failed attempts so far (first failure → backoff[0]);
 // beyond the schedule's end the last entry applies.
 func (c *Client) sleep(ctx context.Context, i int) bool {
-	d := defaultBackoff[0]
-	if len(c.backoff) > 0 {
-		if i >= len(c.backoff) {
-			i = len(c.backoff) - 1
-		}
-		d = c.backoff[i]
+	if i >= len(c.backoff) {
+		i = len(c.backoff) - 1
 	}
-	t := time.NewTimer(d)
+	t := time.NewTimer(c.backoff[i])
 	defer t.Stop()
 	select {
 	case <-ctx.Done():
