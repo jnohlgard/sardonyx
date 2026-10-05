@@ -117,7 +117,7 @@ Options
   --api-key        Onyx API key             (env ONYX_API_KEY)
   --cc-pair-id     Onyx connector-credential-pair id, int  (env ONYX_CC_PAIR_ID)
   --branch         Branch to clone; git URLs only (default: repo's default branch)
-  --source         Override the document "source" enum: file | github | gitlab | web | ingestion_api
+  --doc-source     Override the document "source" enum: file | github | gitlab | web | ingestion_api
   --id-base        Arbitrary ID base for every document of this run (env SARD_ID_BASE).
                    Default: normalized origin URL (git) or cleaned absolute root path (local).
                    Keeps IDs stable across forks / URL changes (git) or moved dirs, mount
@@ -168,7 +168,7 @@ Decisions made while implementing T7 (recorded in the `internal/cli` package doc
 - `cli.Run(args) (exitCode int)` keeps the stub's signature. The pipeline logs
   everything through a `*slog.Logger` built by `Run` from `--log-level` (stderr);
   `cmd/sard/main.go` prints nothing and only maps the returned code to `os.Exit`.
-- Bad flag values — unknown `--source`, negative `--limit` / `--max-depth` /
+- Bad flag values — unknown `--doc-source`, negative `--limit` / `--max-depth` /
   `--max-file-size` / `--cc-pair-id`, invalid `--log-level`, unknown flags, a
   wrong number of arguments, and unrecognized inputs (bad path, invalid git URL
   form) — are all configuration errors, exit 2, checked in one pre-flight step.
@@ -337,7 +337,7 @@ are a configuration error (exit code 2), detected pre-flight.
     segment disqualifies the shorthand — that spelling is a filesystem path
     (e.g. `./notes.md`), and such inputs are configuration errors (exit code
     2), not repository inputs.
-  - Host detection → default `--source` value: `github.com` → `github`, `gitlab.*` → `gitlab`,
+  - Host detection → default `--doc-source` value: `github.com` → `github`, `gitlab.*` → `gitlab`,
     anything else → `file`.
 - **Cloning:** `os/exec` runs `git clone --depth 1 [--branch <b>] <url> <tmpdir>` into a
   fresh temp dir from `os.MkdirTemp` (shallow = fast, small); the temp dir is removed via
@@ -426,7 +426,7 @@ the `--id-base` / `SARD_ID_BASE` override when set, else the source's default
 | `semantic_identifier`| `owner/repo/path/to/file.md`                             | `<dir-name>/path/to/file.md`                   |
 | `title`              | first `# …` heading in the file, else the filename       | same                                           |
 | `sections`           | `[{"text": content, "link": blob_url or None}]`          | `[{"text": content}]`                          |
-| `source`             | `github` / `gitlab` / `file` (per §5.2; `--source` override) | `file` (or override)                   |
+| `source`             | `github` / `gitlab` / `file` (per §5.2; `--doc-source` override) | `file` (or override)                 |
 | `metadata`           | `{repo: <owner/repo>, path: <relpath>, commit: <sha>, ingested_by: "sardonyx"}` | `{path: <relpath>, ingested_by: "sardonyx"}` |
 | `doc_updated_at`     | last-commit timestamp, RFC-3339 UTC                      | mtime, RFC-3339 UTC                            |
 | `from_ingestion_api` | `true`                                                   | `true`                                         |
@@ -630,7 +630,7 @@ Run with `go test ./...`.
     stdout (stable order, deterministic IDs) and sends nothing; exit codes per
     §8 verified in `cli_test.go` — 0 (all OK, 0 files with a warning, successful
     dry-run), 1 (≥1 failed file; a 400 fails per-file without aborting), 2
-    (missing API key / cc-pair-id, bad path, bad flag values including `--source`
+    (missing API key / cc-pair-id, bad path, bad flag values including `--doc-source`
     and non-int/negative ints, unknown subcommand, and a 401/403 auth abort),
     130 (SIGINT); end-to-end smoke tests invoke `Run` — the same entry function
     the binary uses — against a `net/http/httptest` mock with temp-dir fixtures,
@@ -816,7 +816,7 @@ Run with `go test ./...`.
 | 4 | **Tags**: `metadata` values become Onyx tags; free-form values may be noise in UI. | Metadata stays conservative by default; optional user tags via the repeatable `--tag` flag (T13, §10). |
 | 5 | **Branch/tag targeting**: `--branch` covers branches; tags are a small extension (git handles both in `--branch`). | Support via `--branch` (git accepts refs). |
 | 6 | **Private repos without token in URL**: some users put the token in the URL itself. | Support `--token` injection; also pass through URLs that already embed a token. |
-| 7 | **`source` enum for non-GitHub/GitLab hosts** (Bitbucket, self-hosted Gitea). | Default `file`; `--source` override available. |
+| 7 | **`source` enum for non-GitHub/GitLab hosts** (Bitbucket, self-hosted Gitea). | Default `file`; `--doc-source` override available. |
 | 8 | **Very large monorepos**: thousands of md files → long sequential runs. | `--include` scoping + `--limit`; concurrency is a v2 item. |
 | 9 | **Go toolchain on the target machine**: only needed to *build*; the shipped binary is static. | Document build instructions; ship prebuilt binaries for common platforms. |
 | 10 | **Document ID migration**: forks, repo URL changes, and moved local roots change the default ID base → new IDs → previous documents go stale (no deletion implemented in v1, #1). | `--id-base` / `SARD_ID_BASE` override; recommend pinning one canonical base per project (§6). |
@@ -882,7 +882,7 @@ Options
   --log-level    debug | info | warning | error (default info)
 ```
 
-Only the Onyx-side flags exist — no `--source`, `--branch`, `--token`,
+Only the Onyx-side flags exist — no `--doc-source`, `--branch`, `--token`,
 include/exclude, depth/size, `--limit`, `--dry-run`, or `--id-base`:
 discovery is out of scope for check, and git concerns do not apply.
 `--cc-pair-id` is treated exactly as in ingest: `0` is "unset", negative

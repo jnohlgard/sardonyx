@@ -173,7 +173,7 @@ up on the Connectors page, but the API itself accepts `null`.
 | ------- | ---------------- |
 | Stable `id` | deterministic hash per file (see PLAN.md §6) → re-runs update, not duplicate |
 | `cc_pair_id` | user supplies it (flag/env); we do not create connectors ourselves |
-| `source` | `github` / `gitlab` / `file` by default, `--source` override |
+| `source` | `github` / `gitlab` / `file` by default, `--doc-source` override |
 | `doc_updated_at` | last commit timestamp (git) or file mtime (local) |
 | `sections[0].link` | GitHub blob URL when a public GitHub URL was the input, else null |
 | `metadata` | repo, path, commit sha, `ingested_by` |
