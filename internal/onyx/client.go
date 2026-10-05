@@ -22,12 +22,11 @@
 // with a nil error (a per-document failure that never aborts the run);
 // the reason carries the status code plus a short body excerpt.
 //
-// cc_pair_id: NewClient takes ccPairID to match the plan's §7 signature,
-// but Ingest sends the payload's own CCPairID. The transform stamps it
-// from the same Settings.CCPairID, so the payload is the single source
-// of truth on the wire; the constructor value is kept only for
-// signature compatibility and may seed a client-level default in a
-// future revision.
+// cc_pair_id: Ingest sends the payload's own CCPairID — the transform
+// stamps it from the same Settings.CCPairID, so the payload is the
+// single source of truth on the wire. The Client holds no cc-pair of
+// its own; the only cc-pair it consumes is the ccPairID argument to
+// Check (probe 3, below).
 //
 // Backoff: the wait schedule lives in an unexported field (default
 // 1 s / 4 s / 16 s per §7) so tests can inject millisecond waits and the
@@ -43,8 +42,8 @@
 // ingestion permission, and the cc-pair's existence without creating,
 // updating, or deleting any document. It fails via the ErrUnreachable,
 // ErrNoIngestionAPI, and ErrCCPairNotFound sentinels (plus ErrAuth for
-// a 401/403) so the CLI can map them to exit codes 1 / 2 (2 / 2); the
-// NewClient ccPairID argument is what probe 3 queries.
+// a 401/403) so the CLI can map them to exit codes 1 / 2 (2 / 2); its
+// ccPairID argument is what probe 3 queries.
 //
 // ListDocs is the sard ls data source (docs/PLAN.md §14): a single
 // read-only GET /onyx-api/ingestion — the read-only sibling of the
@@ -103,24 +102,22 @@ var ErrAuth = errors.New("Onyx rejected the API key")
 
 // Client is a client for the Onyx Ingestion API.
 type Client struct {
-	apiURL   string
-	apiKey   string
-	ccPairID int // see package doc: the payload's CCPairID is what is sent
-	http     *http.Client
-	backoff  []time.Duration // retry waits; tests replace defaultBackoff
+	apiURL  string
+	apiKey  string
+	http    *http.Client
+	backoff []time.Duration // retry waits; tests replace defaultBackoff
 }
 
 // NewClient builds a Client for an Onyx API base URL and Bearer
 // credentials. A trailing "/" on apiURL is stripped before joining the
-// /onyx-api/ingestion path. ccPairID is kept for signature compatibility
-// with plan §7 (see the package doc for the reconciliation).
-func NewClient(apiURL, apiKey string, ccPairID int) *Client {
+// /onyx-api/ingestion path. The client holds no cc-pair: Ingest sends
+// the payload's own CCPairID, and Check takes the id as an argument.
+func NewClient(apiURL, apiKey string) *Client {
 	return &Client{
-		apiURL:   strings.TrimRight(apiURL, "/"),
-		apiKey:   apiKey,
-		ccPairID: ccPairID,
-		http:     &http.Client{Timeout: defaultTimeout},
-		backoff:  defaultBackoff,
+		apiURL:  strings.TrimRight(apiURL, "/"),
+		apiKey:  apiKey,
+		http:    &http.Client{Timeout: defaultTimeout},
+		backoff: defaultBackoff,
 	}
 }
 

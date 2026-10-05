@@ -47,7 +47,7 @@ func testPayload() models.OnyxPayload {
 // injection) so retry tests never sleep for real.
 func fastClient(t *testing.T, ts *httptest.Server) *Client {
 	t.Helper()
-	c := NewClient(ts.URL, testKey, 42)
+	c := NewClient(ts.URL, testKey)
 	c.backoff = []time.Duration{time.Millisecond, 2 * time.Millisecond, 4 * time.Millisecond}
 	return c
 }
@@ -319,7 +319,7 @@ func TestIngestContextCanceled(t *testing.T) {
 		var res models.IngestResult
 		var err error
 		go func() {
-			res, err = NewClient(ts.URL, testKey, 42).Ingest(ctx, testPayload())
+			res, err = NewClient(ts.URL, testKey).Ingest(ctx, testPayload())
 			close(done)
 		}()
 
@@ -348,7 +348,7 @@ func TestIngestConnectionError(t *testing.T) {
 	addr := l.Addr().String()
 	_ = l.Close() // port now refuses connections
 
-	c := NewClient("http://"+addr, testKey, 42)
+	c := NewClient("http://"+addr, testKey)
 	c.backoff = []time.Duration{time.Millisecond, 2 * time.Millisecond, 4 * time.Millisecond}
 
 	res, err := c.Ingest(context.Background(), testPayload())
@@ -371,7 +371,7 @@ func TestNewClientStripsTrailingSlash(t *testing.T) {
 	}}
 	ts := startServer(t, rec)
 
-	c := NewClient(ts.URL+"/", testKey, 42)
+	c := NewClient(ts.URL+"/", testKey)
 	c.backoff = []time.Duration{time.Millisecond, 2 * time.Millisecond, 4 * time.Millisecond}
 	res, err := c.Ingest(context.Background(), testPayload())
 	if err != nil {

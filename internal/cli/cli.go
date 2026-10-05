@@ -827,8 +827,8 @@ func runCheck(p *checkFlags) int {
 	defer stop()
 
 	start := time.Now()
-	client := onyx.NewClient(settings.APIURL, settings.APIKey, settings.CCPairID)
-	res, err := client.Check(ctx)
+	client := onyx.NewClient(settings.APIURL, settings.APIKey)
+	res, err := client.Check(ctx, settings.CCPairID)
 	if err != nil {
 		if ctx.Err() != nil {
 			log.Warn("check interrupted (Ctrl-C)")
@@ -915,7 +915,7 @@ func runLs(p *lsFlags) int {
 	defer stop()
 
 	start := time.Now()
-	client := onyx.NewClient(settings.APIURL, settings.APIKey, 0) // the GET carries no cc-pair
+	client := onyx.NewClient(settings.APIURL, settings.APIKey)
 	docs, err := client.ListDocs(ctx)
 	if err != nil {
 		if ctx.Err() != nil {
@@ -998,7 +998,7 @@ type fileFailure struct {
 // (RelPath) order. An Onyx 401/403 aborts with an error line and exit 2
 // before any summary (see the package doc).
 func ingestAll(ctx context.Context, files []models.IngestedFile, docSource string, settings *config.Settings, idBase string, skipped int, elapsed time.Duration, log *slog.Logger) int {
-	client := onyx.NewClient(settings.APIURL, settings.APIKey, settings.CCPairID)
+	client := onyx.NewClient(settings.APIURL, settings.APIKey)
 	total := len(files)
 
 	var created, updated int

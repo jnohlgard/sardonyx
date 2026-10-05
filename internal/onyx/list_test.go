@@ -277,7 +277,7 @@ func TestListDocsUnreachable(t *testing.T) {
 	addr := l.Addr().String()
 	_ = l.Close() // port now refuses connections
 
-	c := NewClient("http://"+addr, testKey, 0)
+	c := NewClient("http://"+addr, testKey)
 	c.backoff = []time.Duration{time.Millisecond, 2 * time.Millisecond, 4 * time.Millisecond}
 	_, err = c.ListDocs(context.Background())
 	if err == nil {
@@ -385,7 +385,7 @@ func TestListDocsNeverLeaksKey(t *testing.T) {
 	}
 	addr := l.Addr().String()
 	_ = l.Close()
-	c := NewClient("http://"+addr, testKey, 0)
+	c := NewClient("http://"+addr, testKey)
 	c.backoff = []time.Duration{time.Millisecond, 2 * time.Millisecond, 4 * time.Millisecond}
 	if _, err := c.ListDocs(context.Background()); err != nil {
 		check("error: unreachable", err.Error())

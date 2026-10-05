@@ -121,7 +121,7 @@ func TestCheckHappyPath(t *testing.T) {
 	rec := &checkRecorder{respond: checkHappy()}
 	ts := startCheckServer(t, rec)
 
-	res, err := fastClient(t, ts).Check(context.Background())
+	res, err := fastClient(t, ts).Check(context.Background(), 42)
 	if err != nil {
 		t.Fatalf("Check: %v", err)
 	}
@@ -190,7 +190,7 @@ func TestCheckProbe2Unauthorized(t *testing.T) {
 	}}
 	ts := startCheckServer(t, rec)
 
-	res, err := fastClient(t, ts).Check(context.Background())
+	res, err := fastClient(t, ts).Check(context.Background(), 42)
 	if !errors.Is(err, ErrAuth) {
 		t.Fatalf("err = %v, want ErrAuth", err)
 	}
@@ -229,7 +229,7 @@ func TestCheckProbe2Forbidden(t *testing.T) {
 			}}
 			ts := startCheckServer(t, rec)
 
-			res, err := fastClient(t, ts).Check(context.Background())
+			res, err := fastClient(t, ts).Check(context.Background(), 42)
 			if got := rec.count(http.MethodGet, "/onyx-api/ingestion"); got != 1 {
 				t.Errorf("GET ingestion requests = %d, want 1", got)
 			}
@@ -286,7 +286,7 @@ func TestCheckGET404And405Fallback(t *testing.T) {
 				}}
 				ts := startCheckServer(t, rec)
 
-				res, err := fastClient(t, ts).Check(context.Background())
+				res, err := fastClient(t, ts).Check(context.Background(), 42)
 				if err != nil {
 					t.Fatalf("Check: %v", err)
 				}
@@ -332,7 +332,7 @@ func TestCheckFallbackNoIngestionAPI(t *testing.T) {
 			}}
 			ts := startCheckServer(t, rec)
 
-			res, err := fastClient(t, ts).Check(context.Background())
+			res, err := fastClient(t, ts).Check(context.Background(), 42)
 			if !errors.Is(err, ErrNoIngestionAPI) {
 				t.Fatalf("err = %v, want ErrNoIngestionAPI", err)
 			}
@@ -371,7 +371,7 @@ func TestCheckProbe2Retries(t *testing.T) {
 		}}
 		ts := startCheckServer(t, rec)
 
-		res, err := fastClient(t, ts).Check(context.Background())
+		res, err := fastClient(t, ts).Check(context.Background(), 42)
 		if err != nil {
 			t.Fatalf("Check: %v", err)
 		}
@@ -394,7 +394,7 @@ func TestCheckProbe2Retries(t *testing.T) {
 		}}
 		ts := startCheckServer(t, rec)
 
-		res, err := fastClient(t, ts).Check(context.Background())
+		res, err := fastClient(t, ts).Check(context.Background(), 42)
 		if !errors.Is(err, ErrUnreachable) {
 			t.Fatalf("err = %v, want ErrUnreachable", err)
 		}
@@ -424,10 +424,10 @@ func TestCheckProbe1ConnectionFailure(t *testing.T) {
 	addr := l.Addr().String()
 	_ = l.Close() // port now refuses connections
 
-	c := NewClient("http://"+addr, testKey, 42)
+	c := NewClient("http://"+addr, testKey)
 	c.backoff = []time.Duration{time.Millisecond, 2 * time.Millisecond, 4 * time.Millisecond}
 
-	res, err := c.Check(context.Background())
+	res, err := c.Check(context.Background(), 42)
 	if !errors.Is(err, ErrUnreachable) {
 		t.Fatalf("err = %v, want ErrUnreachable", err)
 	}
@@ -463,10 +463,10 @@ func TestCheckProbe2ConnectionFailure(t *testing.T) {
 	ts := httptest.NewServer(h)
 	t.Cleanup(ts.Close)
 
-	c := NewClient(ts.URL, testKey, 42)
+	c := NewClient(ts.URL, testKey)
 	c.backoff = []time.Duration{time.Millisecond, 2 * time.Millisecond, 4 * time.Millisecond}
 
-	res, err := c.Check(context.Background())
+	res, err := c.Check(context.Background(), 42)
 	if !errors.Is(err, ErrUnreachable) {
 		t.Fatalf("err = %v, want ErrUnreachable", err)
 	}
@@ -497,7 +497,7 @@ func TestCheckHealthDegraded(t *testing.T) {
 			}}
 			ts := startCheckServer(t, rec)
 
-			res, err := fastClient(t, ts).Check(context.Background())
+			res, err := fastClient(t, ts).Check(context.Background(), 42)
 			if err != nil {
 				t.Fatalf("Check: %v (a non-200 health is a warning, not an error)", err)
 			}
@@ -528,7 +528,7 @@ func TestCheckCCPair200(t *testing.T) {
 			}}
 			ts := startCheckServer(t, rec)
 
-			res, err := fastClient(t, ts).Check(context.Background())
+			res, err := fastClient(t, ts).Check(context.Background(), 42)
 			if err != nil {
 				t.Fatalf("Check: %v", err)
 			}
@@ -560,7 +560,7 @@ func TestCheckCCPairNotFound(t *testing.T) {
 	}}
 	ts := startCheckServer(t, rec)
 
-	res, err := fastClient(t, ts).Check(context.Background())
+	res, err := fastClient(t, ts).Check(context.Background(), 42)
 	if !errors.Is(err, ErrCCPairNotFound) {
 		t.Fatalf("err = %v, want ErrCCPairNotFound", err)
 	}
@@ -595,7 +595,7 @@ func TestCheckCCPairFallbackWarnings(t *testing.T) {
 			}}
 			ts := startCheckServer(t, rec)
 
-			res, err := fastClient(t, ts).Check(context.Background())
+			res, err := fastClient(t, ts).Check(context.Background(), 42)
 			if err != nil {
 				t.Fatalf("Check: %v (a probe-3 failure in the fallback flow is only a warning)", err)
 			}
@@ -624,7 +624,7 @@ func TestCheckContextCanceled(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan struct{})
 	go func() {
-		_, err := NewClient(ts.URL, testKey, 42).Check(ctx)
+		_, err := NewClient(ts.URL, testKey).Check(ctx, 42)
 		if !errors.Is(err, context.Canceled) {
 			t.Errorf("err = %v, want context.Canceled", err)
 		}
@@ -657,7 +657,7 @@ func TestCheckNeverLeaksKey(t *testing.T) {
 		t.Helper()
 		rec := &checkRecorder{respond: respond}
 		ts := startCheckServer(t, rec)
-		res, err := fastClient(t, ts).Check(context.Background())
+		res, err := fastClient(t, ts).Check(context.Background(), 42)
 		return rec, res, err
 	}
 
@@ -737,9 +737,9 @@ func TestCheckNeverLeaksKey(t *testing.T) {
 	}
 	addr := l.Addr().String()
 	_ = l.Close()
-	c := NewClient("http://"+addr, testKey, 42)
+	c := NewClient("http://"+addr, testKey)
 	c.backoff = []time.Duration{time.Millisecond, 2 * time.Millisecond, 4 * time.Millisecond}
-	if _, err := c.Check(context.Background()); err != nil {
+	if _, err := c.Check(context.Background(), 42); err != nil {
 		check("error: unreachable", err.Error())
 	} else {
 		t.Fatal("expected an error for a dead port")

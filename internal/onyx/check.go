@@ -108,11 +108,15 @@ const (
 //     (a modern deployment), otherwise a warning (the caller); 403 or
 //     anything else → no error.
 //
+// ccPairID is the id probe 3 queries: the client holds no cc-pair
+// itself (Ingest sends the payload's own CCPairID), so the caller
+// passes the configured id here.
+//
 // Errors: the CLI maps them with errors.Is (docs/PLAN.md §13.4) —
 // ErrUnreachable → 1; ErrAuth, ErrNoIngestionAPI, ErrCCPairNotFound →
 // 2; the context's error (cancellation) → 130. The API key never
 // appears in any returned string.
-func (c *Client) Check(ctx context.Context) (CheckResult, error) {
+func (c *Client) Check(ctx context.Context, ccPairID int) (CheckResult, error) {
 	// Probe 1: reachability (no auth, a single un-retried attempt).
 	healthy, err := c.probeHealth(ctx)
 	if err != nil {
@@ -136,7 +140,7 @@ func (c *Client) Check(ctx context.Context) (CheckResult, error) {
 	// only when probe 2 was the GET (a modern deployment where the
 	// endpoint is known to exist); in the fallback flow an absent
 	// endpoint is indistinguishable from an absent pair.
-	pair, err := c.probeCCPair(ctx, !usedFallback)
+	pair, err := c.probeCCPair(ctx, !usedFallback, ccPairID)
 	if err != nil {
 		return res, err
 	}
@@ -358,8 +362,9 @@ func (c *Client) attemptKeyPost(ctx context.Context) (verdict keyVerdict, reason
 // warns). 403 or anything else → no error (the key may lack the scope
 // for this endpoint while having passed the one that matters for
 // ingestion). A canceled context is returned as the context's error.
-func (c *Client) probeCCPair(ctx context.Context, modern bool) (*CCPairInfo, error) {
-	res, err := c.doProbe(ctx, http.MethodGet, fmt.Sprintf(ccpairPath, c.ccPairID), nil, true)
+// ccPairID is the id in the endpoint's path (and in the info on a 200).
+func (c *Client) probeCCPair(ctx context.Context, modern bool, ccPairID int) (*CCPairInfo, error) {
+	res, err := c.doProbe(ctx, http.MethodGet, fmt.Sprintf(ccpairPath, ccPairID), nil, true)
 	if err != nil {
 		if ctx.Err() != nil {
 			return nil, ctx.Err()
@@ -372,12 +377,12 @@ func (c *Client) probeCCPair(ctx context.Context, modern bool) (*CCPairInfo, err
 	switch {
 	case res.StatusCode == http.StatusOK:
 		body := parseCCPairBody(raw)
-		info := CCPairInfo{ID: c.ccPairID, Name: body.Name, Status: body.Status, Docs: body.NumDocsIndexed}
+		info := CCPairInfo{ID: ccPairID, Name: body.Name, Status: body.Status, Docs: body.NumDocsIndexed}
 		return &info, nil
 
 	case res.StatusCode == http.StatusNotFound && modern:
 		return nil, fmt.Errorf("%s: cc-pair-id %d not found on this deployment — copy it from the connector's Admin Panel URL: %w",
-			c.apiURL, c.ccPairID, ErrCCPairNotFound)
+			c.apiURL, ccPairID, ErrCCPairNotFound)
 
 	default:
 		// 403 (the key lacks the scope for this endpoint), 404 (the
