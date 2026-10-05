@@ -501,6 +501,12 @@ func buildLogger(level string) (*slog.Logger, error) {
 	return slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: l})), nil
 }
 
+// invalidCCPairID is the shared diagnostic for a negative --cc-pair-id
+// (0 means unset; both ingest and check reject a negative value).
+func invalidCCPairID(id int) error {
+	return fmt.Errorf("invalid --cc-pair-id %d (must be >= 0)", id)
+}
+
 // validate pre-flights the parsed flag values (docs/PLAN.md §8: bad flag
 // values are a configuration error, exit 2). It runs before
 // config.Resolve; both failure kinds exit 2 anyway, so the order only
@@ -514,7 +520,7 @@ func validate(p *ingestFlags) error {
 		return fmt.Errorf("invalid --doc-source %q (want %s)", p.source, strings.Join(validSources, " | "))
 	}
 	if p.ccPairID < 0 {
-		return fmt.Errorf("invalid --cc-pair-id %d (must be >= 0)", p.ccPairID)
+		return invalidCCPairID(p.ccPairID)
 	}
 	if p.limit < 0 {
 		return fmt.Errorf("invalid --limit %d (must be >= 0)", p.limit)
@@ -809,7 +815,7 @@ func runCheck(p *checkFlags) int {
 		return 2
 	}
 	if p.ccPairID < 0 {
-		log.Error(fmt.Sprintf("invalid --cc-pair-id %d (must be >= 0)", p.ccPairID))
+		log.Error(invalidCCPairID(p.ccPairID).Error())
 		return 2
 	}
 	settings, err := config.Resolve(config.Flags{
