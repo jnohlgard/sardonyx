@@ -686,9 +686,9 @@ func Run(args []string) int {
 		fmt.Fprintln(os.Stderr, root.UsageString())
 		return 2
 	default:
-		// A flag or argument error on `sard ingest` or
-		// `sard check`: the standard diagnostic plus the full
-		// subcommand usage, exit 2.
+		// A flag or argument error on `sard ingest`, `sard
+		// check`, or `sard ls`: the standard diagnostic plus the
+		// full subcommand usage, exit 2.
 		w := cmd.ErrOrStderr()
 		fmt.Fprintln(w, cmd.ErrPrefix(), err)
 		fmt.Fprintln(w, cmd.UsageString())
