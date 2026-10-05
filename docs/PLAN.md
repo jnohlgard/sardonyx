@@ -149,9 +149,12 @@ Implementation notes:
   (the command's Long text), the usage line, an Arguments section
   describing `<source>`, a static Environment section summarizing the
   env vars behind the flags (the names are hand-written and kept in
-  sync with `internal/config` by `TestIngestUsageTemplateEnvNames`),
-  and the flag list — all hand-written additions to the usage
-  template, below the usage line.
+  sync with `internal/config` by `TestIngestUsageSectionsEnvNames`),
+  and the flag list. The sections are not a fork of cobra's default
+  usage template: `withUsageSections` splices them into the live default
+  template (fetched from the pinned cobra version) below the usage line,
+  so the only cobra-version-sensitive text is the splice anchor, guarded
+  by `TestUsageTemplateAnchors`.
 - Logging via `log/slog` (level from `--log-level`); log output goes to stderr.
 - Root-level `--version` (and `-v`), a cobra built-in: it prints the
   version string stamped at build time (`main.version`, README
@@ -701,7 +704,7 @@ Run with `go test ./...`.
     no Ingestion API; exit 1 for a dead port; 130 for SIGINT mid-check;
     `sard check --help` → exit 0 with exactly four flags and an
     Environment section listing exactly `ONYX_API_URL`, `ONYX_API_KEY`,
-    `ONYX_CC_PAIR_ID` (a `TestCheckUsageTemplateEnvNames` guard, mirroring
+    `ONYX_CC_PAIR_ID` (a `TestCheckUsageSectionsEnvNames` guard, mirroring
     the ingest one); the root usage lists `check` and `ingest`. The
     existing ingest/dry-run suite passes unmodified.
   - T11c — README ("Verify your setup" subsection in Getting started +
@@ -740,7 +743,7 @@ Run with `go test ./...`.
       endpoint and the URL, never the key); exit 1 for a dead port and for
       a persistent 429; 130 for SIGINT mid-list; `sard ls --help` → exit 0
       with exactly three flags and an Environment section listing exactly
-      `ONYX_API_URL`, `ONYX_API_KEY` (a `TestLsUsageTemplateEnvNames`
+      `ONYX_API_URL`, `ONYX_API_KEY` (a `TestLsUsageSectionsEnvNames`
       guard, mirroring check's); the root usage lists `ls`, `check`, and
       `ingest`. The existing ingest/dry-run/check suites pass unmodified.
   - T12c — README (a "List ingested documents" subsection in Getting
@@ -883,10 +886,11 @@ Only the Onyx-side flags exist — no `--source`, `--branch`, `--token`,
 include/exclude, depth/size, `--limit`, `--dry-run`, or `--id-base`:
 discovery is out of scope for check, and git concerns do not apply.
 `--cc-pair-id` is treated exactly as in ingest: `0` is "unset", negative
-is invalid. The usage template follows the ingest convention (a Long
-summary; an Environment section listing exactly `ONYX_API_URL`,
-`ONYX_API_KEY`, `ONYX_CC_PAIR_ID`; no Arguments section, since there is
-no positional argument).
+is invalid. The usage splices an Environment section into cobra's
+default template below the usage line (via `withUsageSections`),
+listing exactly `ONYX_API_URL`, `ONYX_API_KEY`, `ONYX_CC_PAIR_ID` — the
+command's Long text is the summary, and there is no Arguments section
+since there is no positional argument.
 
 ### 13.2 The probes
 
@@ -1010,9 +1014,9 @@ type CheckResult struct {
 - New `checkFlags{apiURL, apiKey, ccPairID, logLevel}` struct (separate
   from `ingestFlags` — check has no git or source flags), `newCheckCmd`
   (`Use: "check"`, `Args: cobra.NoArgs`, the four flags above,
-  `checkUsageTemplate` = the ingest template minus the Arguments
-  section, Environment section listing exactly the three Onyx
-  variables), and `runCheck` mirroring `runIngest`'s pre-flight shape:
+  usage set via `withUsageSections(checkUsageSections)` — an Environment
+  section listing exactly the three Onyx variables, no Arguments
+  section), and `runCheck` mirroring `runIngest`'s pre-flight shape:
   `buildLogger` → flag validation (`--cc-pair-id >= 0`) →
   `config.Resolve(Flags{…, DryRun: false})` → `signal.NotifyContext` →
   `onyx.NewClient(…).Check(ctx)` → the report → the exit code.
@@ -1073,9 +1077,11 @@ Options
 
 Three flags only: no `--cc-pair-id` (the endpoint is key-scoped,
 §14.3.1), and no source/git/include/limit/dry-run flags (no discovery).
-The usage template follows the check convention (a Long summary; an
-Environment section listing exactly `ONYX_API_URL` and `ONYX_API_KEY`;
-no Arguments section, since there is no positional argument).
+The usage splices an Environment section into cobra's default template
+below the usage line (via `withUsageSections`), listing exactly
+`ONYX_API_URL` and `ONYX_API_KEY` — the command's Long text is the
+summary, and there is no Arguments section since there is no positional
+argument.
 
 ### 14.2 The request
 
@@ -1160,9 +1166,10 @@ set; precedence and the dry-run behavior unchanged).
 **`internal/cli`**:
 
 - `lsFlags{apiURL, apiKey, logLevel}`; `newLsCmd` (`Use: "ls"`,
-  `Args: cobra.NoArgs`, the three flags, the usage template = the check
-  template with an Environment section listing exactly `ONYX_API_URL`,
-  `ONYX_API_KEY`); `runLs` mirroring `runCheck`'s pre-flight shape minus
+  `Args: cobra.NoArgs`, the three flags, usage set via
+  `withUsageSections(lsUsageSections)` — an Environment section listing
+  exactly `ONYX_API_URL`, `ONYX_API_KEY`); `runLs` mirroring
+  `runCheck`'s pre-flight shape minus
   the cc-pair validation: `buildLogger` →
   `config.Resolve(Flags{…, CCPairOptional: true})` →
   `signal.NotifyContext` → `onyx.NewClient(url, key, 0).ListDocs(ctx)` →
