@@ -77,7 +77,7 @@ CGO_ENABLED=0 go build -ldflags "-X main.version=1.0.0" -o sard ./cmd/sard
   `… statically linked …`), so it runs on almost any Linux machine.
 - The `-X main.version=…` stamp is optional (it defaults to `dev`); it is
   what `sard --version` prints.
-- Building needs a Go toolchain (`go 1.24` per `go.mod`) and, for ingesting
+- Building needs a Go toolchain (`go 1.27` per `go.mod`) and, for ingesting
   git repositories at run time, a `git` binary on the target.
 
 Alternative for your own machine: `go install` from the checkout —
