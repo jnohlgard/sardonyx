@@ -60,7 +60,7 @@
 //     binary) stopped the run.
 //   - 2 — a configuration error before ingestion: a missing/invalid
 //     setting (config.ErrConfiguration), a bad flag value (unknown
-//     --source, negative --limit / --max-depth / --max-file-size /
+//     --doc-source, negative --limit / --max-depth / --max-file-size /
 //     --cc-pair-id, invalid --log-level, an unknown flag, a wrong number
 //     of arguments), an unrecognized input (bad path, invalid git URL
 //     form), a missing subcommand, or an Onyx 401/403. The auth case is
@@ -158,7 +158,7 @@ import (
 	"sardonyx/internal/transform"
 )
 
-// validSources are the accepted values for --source (the Onyx
+// validSources are the accepted values for --doc-source (the Onyx
 // DocumentSource enum, docs/onyx-ingestion-api.md).
 var validSources = []string{
 	models.DocumentSourceFile,
@@ -459,7 +459,7 @@ credentials.`,
 	f.StringVar(&p.apiKey, "api-key", "", "Onyx API key (env: "+config.EnvAPIKey+")")
 	f.IntVar(&p.ccPairID, "cc-pair-id", 0, "Onyx connector-credential-pair id (env: "+config.EnvCCPairID+")")
 	f.StringVar(&p.branch, "branch", "", "branch to clone; git sources only")
-	f.StringVar(&p.source, "source", "", "override the document source enum: "+strings.Join(validSources, " | "))
+	f.StringVar(&p.source, "doc-source", "", "override the document source enum: "+strings.Join(validSources, " | "))
 	f.StringVar(&p.idBase, "id-base", "", "arbitrary document-ID base for this run (env: "+config.EnvIDBase+")")
 	f.StringArrayVar(&p.include, "include", nil, "include filter, repeatable (e.g. \"docs/**\")")
 	f.StringArrayVar(&p.exclude, "exclude", nil, "exclude filter, repeatable (on top of the default noise-dir exclusions)")
@@ -511,7 +511,7 @@ func validate(p *ingestFlags) error {
 		if slices.Contains(validSources, p.source) {
 			return nil
 		}
-		return fmt.Errorf("invalid --source %q (want %s)", p.source, strings.Join(validSources, " | "))
+		return fmt.Errorf("invalid --doc-source %q (want %s)", p.source, strings.Join(validSources, " | "))
 	}
 	if p.ccPairID < 0 {
 		return fmt.Errorf("invalid --cc-pair-id %d (must be >= 0)", p.ccPairID)

@@ -66,7 +66,7 @@ type NormalizedURL struct {
 	// Source is the default Onyx source enum for the origin's host
 	// (models.DocumentSource*): github.com → github, gitlab.* →
 	// gitlab, anything else — including local file:// origins — →
-	// file. A --source flag can override it at transform time.
+	// file. A --doc-source flag can override it at transform time.
 	Source string
 	// IDBase is the run's default document-ID base (docs/PLAN.md
 	// §5.2, §6): the origin URL with a lowercased host, a trailing

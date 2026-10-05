@@ -445,7 +445,7 @@ func TestRunConfigurationErrors(t *testing.T) {
 		{name: "unknown subcommand", args: []string{"frobnicate", dir}},
 		{name: "no arguments", args: []string{}},
 		{name: "missing source", args: []string{"ingest"}},
-		{name: "unknown --source value", args: []string{"ingest", dir, "--source", "bitbucket"}},
+		{name: "unknown --doc-source value", args: []string{"ingest", dir, "--doc-source", "bitbucket"}},
 		{name: "negative --limit", args: []string{"ingest", dir, "--limit", "-1"}},
 		{name: "negative --cc-pair-id", args: []string{"ingest", dir, "--cc-pair-id", "-1"}},
 		{name: "non-int --cc-pair-id", args: []string{"ingest", dir, "--cc-pair-id", "abc"}},
@@ -1421,7 +1421,7 @@ func TestRunCheckHelp(t *testing.T) {
 			t.Errorf("the Flags section is missing %s:\n%s", want, flagsSection)
 		}
 	}
-	for _, absent := range []string{"--source", "--branch", "--token", "--include", "--exclude", "--max-depth", "--max-file-size", "--limit", "--dry-run", "--id-base"} {
+	for _, absent := range []string{"--doc-source", "--branch", "--token", "--include", "--exclude", "--max-depth", "--max-file-size", "--limit", "--dry-run", "--id-base"} {
 		if strings.Contains(s, absent) {
 			t.Errorf("the help output mentions %s (check has no source/git/limit/dry-run/id-base flags)", absent)
 		}
@@ -1775,7 +1775,7 @@ func TestRunLsHelp(t *testing.T) {
 			t.Errorf("the Flags section is missing %s:\n%s", want, flagsSection)
 		}
 	}
-	for _, absent := range []string{"--cc-pair-id", "--source", "--branch", "--token", "--include", "--exclude", "--max-depth", "--max-file-size", "--limit", "--dry-run", "--id-base"} {
+	for _, absent := range []string{"--cc-pair-id", "--doc-source", "--branch", "--token", "--include", "--exclude", "--max-depth", "--max-file-size", "--limit", "--dry-run", "--id-base"} {
 		if strings.Contains(s, absent) {
 			t.Errorf("the help output mentions %s (ls has no cc-pair or source/git/limit/dry-run/id-base flags)", absent)
 		}
