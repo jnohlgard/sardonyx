@@ -467,7 +467,7 @@ the `--id-base` / `SARD_ID_BASE` override when set, else the source's default
 
 ## 7. Onyx client
 
-`onyx.NewClient(apiURL, apiKey string, ccPairID int) *Client`:
+`onyx.NewClient(apiURL, apiKey string) *Client`:
 
 - `client.Ingest(ctx context.Context, payload models.OnyxPayload) (IngestResult, error)` —
   one POST per document to `{api_url}/onyx-api/ingestion`.
@@ -486,9 +486,10 @@ Implementation decisions (T6, recorded after the fact):
 
 - **`cc_pair_id` reconciliation:** `Ingest` sends the payload's own
   `CCPairID` — the transform stamps it from the same `Settings.CCPairID`,
-  so the payload is the single source of truth on the wire; the
-  constructor's `ccPairID` parameter is kept only for signature
-  compatibility with this section.
+  so the payload is the single source of truth on the wire. The client
+  therefore holds no cc-pair of its own (the signature was revised to
+  drop the `ccPairID` parameter); the only cc-pair it consumes is the
+  `ccPairID` argument to `Check`, which probe 3 queries (§13).
 - **Backoff injectability:** the wait schedule lives in an unexported
   client field (default 1 s / 4 s / 16 s per the spec); tests replace it
   with millisecond values, so the retry tests stay fast while production
@@ -977,8 +978,9 @@ caveat of §13.3, visible in the output).
 **`internal/onyx/check.go`** (new file beside `client.go`; `client.go`
 keeps `Ingest` as-is):
 
-- `func (c *Client) Check(ctx context.Context) (CheckResult, error)` —
-  runs probes 1 → 2 (or 2f) → 3 per §13.2.
+- `func (c *Client) Check(ctx context.Context, ccPairID int) (CheckResult, error)` —
+  runs probes 1 → 2 (or 2f) → 3 per §13.2; `ccPairID` is the id probe
+  3 queries (the client holds no cc-pair of its own — §7).
 - Types:
 
 ```go
@@ -1019,7 +1021,7 @@ type CheckResult struct {
   section), and `runCheck` mirroring `runIngest`'s pre-flight shape:
   `buildLogger` → flag validation (`--cc-pair-id >= 0`) →
   `config.Resolve(Flags{…, DryRun: false})` → `signal.NotifyContext` →
-  `onyx.NewClient(…).Check(ctx)` → the report → the exit code.
+  `onyx.NewClient(…).Check(ctx, ccPairID)` → the report → the exit code.
 - `Run` adds the command to the root; the root usage template already
   renders the subcommand list, so no template change is needed (the
   existing root-usage tests gain an assertion for `check`).
