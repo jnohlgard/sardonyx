@@ -13,8 +13,8 @@
 // per-file lastCommit as fallback).
 //
 // Keeping the pipeline in one place means a future change to the skip
-// semantics (e.g. the planned T13 --tag / T14 mime_type) applies to both
-// sources at once instead of silently diverging across two copies.
+// semantics applies to both sources at once instead of silently
+// diverging across two copies.
 package source
 
 import (
